@@ -38,11 +38,35 @@ export default function App() {
   const [alertCount, setAlertCount] = useState(0)
 
   useEffect(() => {
-    if (!getToken()) {
+    async function boot() {
+      // 已有 token 先试
+      if (getToken()) {
+        try {
+          await api.channels()
+          setAuthed(true)
+          return
+        } catch {
+          /* token 失效,往下走自动获取 */
+        }
+      }
+      // 本地(回环)访问免登录:直接向网关索取 token
+      try {
+        const res = await fetch('/bootstrap')
+        if (res.ok) {
+          const data = await res.json()
+          if (data.auto && data.token) {
+            setToken(data.token)
+            await api.channels()
+            setAuthed(true)
+            return
+          }
+        }
+      } catch {
+        /* 拿不到就回落到手工输入 */
+      }
       setAuthed(false)
-      return
     }
-    api.channels().then(() => setAuthed(true)).catch(() => setAuthed(false))
+    boot()
   }, [])
 
   useEffect(() => {

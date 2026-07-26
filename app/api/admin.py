@@ -4,12 +4,13 @@
 """
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import httpx
 
 from app.deps import get_session, require_admin
-from app.models import Alert, Channel, RequestLog, VirtualKey
+from app.models import Alert, Channel, RequestLog, VirtualKey, utcnow
 from app.schemas.admin import (
     AlertOut,
     ChannelCreate,
@@ -271,6 +272,197 @@ async def key_spend(key_id: int, session: AsyncSession = Depends(get_session)):
         "month_to_date_usd": round(spent, 6),
         "monthly_budget_usd": vkey.monthly_budget_usd,
     }
+
+
+# ---------- 批量导入:API Key 与历史账单 ----------
+
+
+@router.post("/import/keys/preview")
+async def import_keys_preview(request: Request):
+    """解析粘贴/上传的内容,识别厂商并预填配置。此步不落库、不联网。"""
+    from app.services.importer import parse_keys
+
+    body = await request.json()
+    text = body.get("text") or ""
+    items = parse_keys(text)
+    return {"count": len(items), "items": items}
+
+
+@router.post("/import/keys/verify")
+async def import_keys_verify(request: Request):
+    """对待导入项逐个做连通性 + 余额探测(用它自己的 key,只调公开接口)。"""
+    import asyncio
+
+    from app.models import Channel as ChannelModel
+    from app.services.balance import fetch_balance
+    from app.services.forwarder import _chat_url, _timeout
+
+    body = await request.json()
+    items = body.get("items") or []
+    client = request.app.state.upstream_client
+    fernet = request.app.state.fernet
+    settings = request.app.state.settings
+
+    async def probe(item: dict) -> dict:
+        api_key = item.get("api_key") or ""
+        base_url = (item.get("base_url") or "").rstrip("/")
+        models = item.get("models") or []
+        out = {"api_key_masked": item.get("api_key_masked"), "reachable": False}
+        if not api_key or not base_url:
+            out["error"] = "缺少 api_key 或 base_url"
+            return out
+        headers = {"Authorization": f"Bearer {api_key}"}
+        model = models[0] if models else "gpt-4o-mini"
+        try:
+            resp = await client.post(
+                f"{base_url}/chat/completions",
+                json={"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1},
+                headers=headers,
+                timeout=_timeout(settings),
+            )
+            out["status_code"] = resp.status_code
+            # 401/403 = key 无效;其余(含 400 模型名不对)都说明端点与鉴权是通的
+            out["reachable"] = resp.status_code not in (401, 403)
+            if resp.status_code in (401, 403):
+                out["error"] = "鉴权失败,key 可能无效"
+        except Exception as exc:  # 网络层问题
+            out["error"] = f"连接失败: {exc!r}"
+            return out
+
+        # 余额:构造临时渠道对象复用探测逻辑(不落库)
+        probe_channel = ChannelModel(
+            id=0,
+            name=item.get("name") or "probe",
+            provider=item.get("provider") or "openai",
+            base_url=base_url,
+            api_key_encrypted=encrypt_api_key(fernet, api_key),
+            models=models,
+            model_map={},
+            prices={},
+            balance_url=item.get("balance_url"),
+            priority=100,
+            enabled=True,
+        )
+        try:
+            result = await fetch_balance(client, probe_channel, fernet)
+            if result.get("ok"):
+                out["balance"] = result.get("balance")
+        except Exception:
+            pass
+        return out
+
+    results = await asyncio.gather(*(probe(i) for i in items), return_exceptions=True)
+    return [
+        r if not isinstance(r, BaseException) else {"reachable": False, "error": repr(r)}
+        for r in results
+    ]
+
+
+@router.post("/import/keys")
+async def import_keys(request: Request, session: AsyncSession = Depends(get_session)):
+    """把确认后的待导入项落库为渠道。重名自动加后缀,单条失败不影响其余。"""
+    body = await request.json()
+    items = body.get("items") or []
+    fernet = request.app.state.fernet
+    created, skipped = [], []
+
+    existing = {
+        name for (name,) in (await session.execute(select(Channel.name))).all()
+    }
+    for item in items:
+        api_key = (item.get("api_key") or "").strip()
+        base_url = (item.get("base_url") or "").strip()
+        if not api_key or not base_url:
+            skipped.append({"name": item.get("name"), "reason": "缺少 api_key 或 base_url"})
+            continue
+        name = (item.get("name") or "channel").strip()
+        base_name, suffix = name, 2
+        while name in existing:
+            name = f"{base_name}-{suffix}"
+            suffix += 1
+        models = item.get("models") or []
+        prices = {k: v for k, v in (item.get("prices") or {}).items() if k in models}
+        channel = Channel(
+            name=name,
+            provider=item.get("provider") or "openai",
+            base_url=base_url,
+            api_key_encrypted=encrypt_api_key(fernet, api_key),
+            models=models,
+            model_map={},
+            prices=prices,
+            balance_url=item.get("balance_url") or None,
+            priority=int(item.get("priority") or 100),
+            enabled=True,
+        )
+        session.add(channel)
+        try:
+            await session.commit()
+            await session.refresh(channel)
+            existing.add(name)
+            created.append({"id": channel.id, "name": channel.name})
+        except IntegrityError:
+            await session.rollback()
+            skipped.append({"name": name, "reason": "名称冲突"})
+    return {"created": created, "skipped": skipped}
+
+
+@router.post("/import/billing")
+async def import_billing(request: Request, session: AsyncSession = Depends(get_session)):
+    """导入厂商后台导出的历史账单,补齐切到网关之前的消费曲线。
+
+    落成 status='imported' 的计量行,与网关自身转发记录区分开。
+    """
+    from app.services.importer import parse_billing
+
+    body = await request.json()
+    rows = parse_billing(body.get("text") or "")
+    if not rows:
+        return {"imported": 0, "reason": "没有解析出可用记录(需要包含日期与成本列)"}
+
+    trace = f"import-{int(utcnow().timestamp())}"
+    total_cost = 0.0
+    for row in rows:
+        session.add(
+            RequestLog(
+                trace_id=trace,
+                virtual_key_id=None,
+                channel_id=None,
+                model=row["model"],
+                upstream_model=None,
+                stream=False,
+                cache_hit=False,
+                status="imported",
+                status_code=200,
+                prompt_tokens=row["prompt_tokens"],
+                completion_tokens=row["completion_tokens"],
+                total_tokens=row["prompt_tokens"] + row["completion_tokens"],
+                usage_source="imported",
+                cost_usd=row["cost_usd"],
+                created_at=row["created_at"],
+            )
+        )
+        total_cost += row["cost_usd"]
+    await session.commit()
+    return {
+        "imported": len(rows),
+        "total_cost_usd": round(total_cost, 6),
+        "trace_id": trace,
+        "note": "已并入大盘统计,status=imported 可与网关自身计量区分",
+    }
+
+
+@router.delete("/import/billing/{trace_id}")
+async def delete_imported_billing(trace_id: str, session: AsyncSession = Depends(get_session)):
+    """撤销一次账单导入(导错了可以回退)。"""
+    from sqlalchemy import delete as sa_delete
+
+    result = await session.execute(
+        sa_delete(RequestLog).where(
+            RequestLog.trace_id == trace_id, RequestLog.status == "imported"
+        )
+    )
+    await session.commit()
+    return {"deleted": result.rowcount or 0}
 
 
 # ---------- 渠道余额(用渠道自己的 key 调公开余额接口) ----------

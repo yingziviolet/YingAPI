@@ -23,6 +23,9 @@ class Settings(BaseSettings):
 
     # 控制面管理 API 的 Bearer token
     admin_token: str = "change-me"
+    # 本地免登录:仅当请求来自回环地址(127.0.0.1/::1)时,控制台可自取 token。
+    # 单机 exe / 本地开发的默认体验;对外部署时置 false 强制手工输入。
+    local_auto_auth: bool = True
     # /metrics 抓取 token(可选):为空保持开放(仅本机/内网);对外部署应设置
     metrics_token: str = ""
 

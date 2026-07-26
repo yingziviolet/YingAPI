@@ -107,6 +107,24 @@ export const api = {
 
   balances: () => request<ChannelBalance[]>('/admin/balances'),
   channelBalance: (id: number) => request<ChannelBalance>(`/admin/channels/${id}/balance`),
+
+  importKeysPreview: (text: string) =>
+    request<{ count: number; items: any[] }>('/admin/import/keys/preview', {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    }),
+  importKeysVerify: (items: any[]) =>
+    request<any[]>('/admin/import/keys/verify', {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    }),
+  importKeys: (items: any[]) =>
+    request<{ created: any[]; skipped: any[] }>('/admin/import/keys', {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    }),
+  importBilling: (text: string) =>
+    request<any>('/admin/import/billing', { method: 'POST', body: JSON.stringify({ text }) }),
 }
 
 export function liveTailUrl(): string {

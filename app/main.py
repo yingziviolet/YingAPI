@@ -172,6 +172,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def healthz():
         return {"status": "ok", "app": settings.app_name}
 
+    # 注意路径不能挂在 /console 下:那里被 StaticFiles mount 整段接管,会 404
+    @app.get("/bootstrap")
+    async def console_bootstrap(request: Request):
+        """本地免登录:回环地址访问时把 admin token 交给控制台,省去手工输入。
+
+        单机 exe / 本地开发的默认体验。对外部署把 GW_LOCAL_AUTO_AUTH 置 false 即可关闭;
+        非回环来源一律拒绝(反代场景请自行确保不透传伪造的 client host)。
+        """
+        client_host = request.client.host if request.client else ""
+        if not settings.local_auto_auth or client_host not in ("127.0.0.1", "::1", "localhost"):
+            return JSONResponse({"auto": False}, status_code=403)
+        return {"auto": True, "token": settings.admin_token}
+
     @app.get("/metrics")
     async def metrics_endpoint(request: Request):
         from prometheus_client import CONTENT_TYPE_LATEST, generate_latest

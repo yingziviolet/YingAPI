@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ChevronDown, ChevronUp, Plus, Trash2, Wallet, Zap } from 'lucide-react'
+import { ChevronDown, ChevronUp, Database, Plus, Trash2, Wallet, Zap } from 'lucide-react'
 import { api } from '../api'
 import type { BreakerState, Channel, ChannelBalance } from '../types'
 import ChannelCard from '../components/ChannelCard'
+import ImportDialog from '../components/ImportDialog'
 import { ViewToggle } from './Keys'
 import { Badge, Button, Card, Empty, IconButton, Input, Led, Table, Td, Tr } from '../components/ui'
 
@@ -16,6 +17,7 @@ export default function Channels() {
     () => (localStorage.getItem('gw_channels_view') as 'grid' | 'list') || 'grid',
   )
   const [showCreate, setShowCreate] = useState(false)
+  const [showImport, setShowImport] = useState(false)
   const [testResult, setTestResult] = useState<Record<number, string>>({})
   const [error, setError] = useState('')
 
@@ -95,11 +97,22 @@ export default function Channels() {
             }}
           />
           <Button onClick={loadBalances}><Wallet size={14} />刷新余额</Button>
+          <Button onClick={() => setShowImport(true)}><Database size={14} />批量导入</Button>
           <Button kind="primary" onClick={() => setShowCreate((v) => !v)}>
             <Plus size={14} />添加渠道
           </Button>
         </div>
       </div>
+
+      {showImport && (
+        <ImportDialog
+          onClose={() => setShowImport(false)}
+          onDone={() => {
+            load().catch(console.error)
+            loadBalances()
+          }}
+        />
+      )}
 
       {showCreate && (
         <CreateChannelForm
@@ -121,7 +134,12 @@ export default function Channels() {
           <Empty
             text="还没有配置渠道"
             hint="添加一个你自己合法持有的 API key,网关就能开始转发"
-            action={<Button kind="primary" onClick={() => setShowCreate(true)}><Plus size={14} />添加渠道</Button>}
+            action={
+              <div className="flex gap-2">
+                <Button kind="primary" onClick={() => setShowCreate(true)}><Plus size={14} />添加渠道</Button>
+                <Button onClick={() => setShowImport(true)}><Database size={14} />批量导入</Button>
+              </div>
+            }
           />
         </Card>
       ) : view === 'grid' ? (
