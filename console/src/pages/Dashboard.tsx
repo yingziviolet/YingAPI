@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, fmtTokens, fmtUsd } from '../api'
 import type { ChannelStat, DailyStat, KeySpend, ModelStat, Overview, VirtualKey } from '../types'
-import Chart, { chartTheme } from '../components/Chart'
+import Chart, { chartLegend, chartTheme } from '../components/Chart'
 import { Card, Empty, StatCard, Td, Th } from '../components/ui'
 
 export default function Dashboard() {
@@ -94,21 +94,23 @@ export default function Dashboard() {
         ) : (
           <Chart
             option={{
-              ...chartTheme,
+              ...chartTheme(),
               tooltip: { trigger: 'axis' },
-              legend: { data: ['请求数', '缓存命中', '成本 (USD)'], textStyle: { color: '#94a3b8' } },
+              legend: { data: ['请求数', '缓存命中', '成本 (USD)'], ...chartLegend() },
               xAxis: { type: 'category', data: daily.map((d) => d.date.slice(5)) },
               yAxis: [
-                { type: 'value', splitLine: chartTheme.splitLine },
+                { type: 'value', splitLine: chartTheme().splitLine },
                 { type: 'value', splitLine: { show: false } },
               ],
               series: [
                 {
-                  name: '请求数', type: 'bar', data: daily.map((d) => d.requests),
+                  name: '请求数', type: 'bar', barMaxWidth: 48,
+                  data: daily.map((d) => d.requests),
                   itemStyle: { color: '#0891b2', borderRadius: [3, 3, 0, 0] },
                 },
                 {
-                  name: '缓存命中', type: 'bar', data: daily.map((d) => d.cache_hits),
+                  name: '缓存命中', type: 'bar', barMaxWidth: 48,
+                  data: daily.map((d) => d.cache_hits),
                   itemStyle: { color: '#10b981', borderRadius: [3, 3, 0, 0] },
                 },
                 {

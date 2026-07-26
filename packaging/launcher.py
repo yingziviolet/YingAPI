@@ -2,9 +2,10 @@
 
 行为:
 - 首次运行在 %LOCALAPPDATA%\\LLMGateway 下建数据目录,生成 admin token 与 Fernet 密钥
-- 起 uvicorn(SQLite,零外部依赖),打开浏览器进控制台
-- 有 pystray 时驻留系统托盘(打开控制台 / 复制 token / 数据目录 / 退出);
-  没有则前台运行,Ctrl+C 退出
+- 起 uvicorn(SQLite,零外部依赖)
+- 用 pywebview 开一个原生应用窗口(Windows 走 WebView2,与 Tauri 同一套渲染),
+  有自己的标题栏和图标,没有地址栏/标签页——和普通桌面软件无异
+- 窗口不可用时(缺 pywebview/WebView2)回退到系统浏览器 + 托盘图标
 """
 import os
 import secrets
@@ -14,6 +15,7 @@ import webbrowser
 from pathlib import Path
 
 APP_NAME = "LLMGateway"
+WINDOW_TITLE = "LLM 网关"
 DEFAULT_PORT = 8080
 
 
@@ -134,24 +136,70 @@ def run_tray(config: dict, server_thread: threading.Thread) -> None:
     icon.run()
 
 
+def wait_for_server(port: int, timeout_s: float = 20.0) -> bool:
+    import socket
+    import time
+
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        with socket.socket() as sock:
+            sock.settimeout(0.3)
+            if sock.connect_ex(("127.0.0.1", port)) == 0:
+                return True
+        time.sleep(0.25)
+    return False
+
+
+def run_window(config: dict) -> bool:
+    """原生应用窗口(pywebview)。成功运行并关闭返回 True;不可用返回 False。"""
+    try:
+        import webview
+    except ImportError:
+        return False
+    try:
+        # 控制台自带鉴权页;把 token 预置进 localStorage 免得每次手输
+        token_js = (
+            "try{localStorage.setItem('gw_admin_token', %r);}catch(e){}"
+            % config["token"]
+        )
+        window = webview.create_window(
+            WINDOW_TITLE,
+            config["url"],
+            width=1280,
+            height=860,
+            min_size=(960, 640),
+            background_color="#f6f7f9",
+        )
+
+        def on_loaded():
+            try:
+                window.evaluate_js(token_js)
+            except Exception:
+                pass
+
+        window.events.loaded += on_loaded
+        webview.start()  # 阻塞到窗口关闭
+        return True
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
+        return False
+
+
 def main() -> None:
     log_path = redirect_std_streams()
     config = ensure_config()
     config["log"] = log_path
     server_thread = threading.Thread(target=run_server, args=(config["port"],), daemon=True)
     server_thread.start()
+    wait_for_server(config["port"])
 
-    # 等端口起来再开浏览器
-    import socket
-    import time
+    # 首选:原生应用窗口(和 Cockpit Tools/Tauri 同款观感)
+    if os.environ.get("GW_WINDOW") != "0" and run_window(config):
+        os._exit(0)  # 窗口关闭即退出应用
 
-    for _ in range(60):
-        with socket.socket() as sock:
-            sock.settimeout(0.3)
-            if sock.connect_ex(("127.0.0.1", config["port"])) == 0:
-                break
-        time.sleep(0.25)
-
+    # 回退:系统浏览器 + 托盘常驻
     if os.environ.get("GW_NO_BROWSER") != "1":
         webbrowser.open(config["url"])
     run_tray(config, server_thread)

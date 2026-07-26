@@ -1,6 +1,33 @@
 @import "tailwindcss";
 
-:root {
+/* 深色为基准色板;.light 通过重定义 Tailwind v4 的颜色变量整体翻转主题。
+   页面里的 slate-950/900/800 是背景层,slate-300~100 是文字层,
+   浅色模式下两端互换,组件代码零改动。 */
+:root.light {
+  --color-slate-950: #f6f7f9; /* 页面背景 */
+  --color-slate-900: #ffffff; /* 面板 */
+  --color-slate-800: #e8ecf1; /* 边框/输入框/悬停 */
+  --color-slate-700: #d3dae3;
+  --color-slate-600: #8b98a9; /* 最浅说明文字 */
+  --color-slate-500: #64748b;
+  --color-slate-400: #475569;
+  --color-slate-300: #334155;
+  --color-slate-200: #1e293b; /* 正文 */
+  --color-slate-100: #0f172a; /* 标题 */
+
+  /* 强调色在白底上加深一档,保证对比度 */
+  --color-cyan-400: #0e7490;
+  --color-cyan-300: #155e75;
+  --color-cyan-200: #164e63;
+  --color-emerald-400: #047857;
+  --color-rose-400: #be123c;
+  --color-amber-400: #b45309;
+}
+
+:root.light {
+  color-scheme: light;
+}
+:root:not(.light) {
   color-scheme: dark;
 }
 

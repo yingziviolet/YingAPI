@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, fmtTokens, fmtUsd } from '../api'
 import type { SubscriptionUsage } from '../types'
-import Chart, { chartTheme } from '../components/Chart'
+import Chart, { chartLegend, chartTheme } from '../components/Chart'
 import { Card, Empty, StatCard, Td, Th } from '../components/ui'
 
 export default function Subscription() {
@@ -80,17 +80,18 @@ export default function Subscription() {
         ) : (
           <Chart
             option={{
-              ...chartTheme,
+              ...chartTheme(),
               tooltip: { trigger: 'axis' },
-              legend: { data: ['消息数', '折算成本'], textStyle: { color: '#94a3b8' } },
+              legend: { data: ['消息数', '折算成本'], ...chartLegend() },
               xAxis: { type: 'category', data: data.daily.map((d) => d.date.slice(5)) },
               yAxis: [
-                { type: 'value', splitLine: chartTheme.splitLine },
+                { type: 'value', splitLine: chartTheme().splitLine },
                 { type: 'value', splitLine: { show: false } },
               ],
               series: [
                 {
-                  name: '消息数', type: 'bar', data: data.daily.map((d) => d.messages),
+                  name: '消息数', type: 'bar', barMaxWidth: 48,
+                  data: data.daily.map((d) => d.messages),
                   itemStyle: { color: '#0891b2', borderRadius: [3, 3, 0, 0] },
                 },
                 {

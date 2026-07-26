@@ -29,6 +29,8 @@ class Channel(Base):
     model_map: Mapped[dict] = mapped_column(JSON, default=dict)
     # 模型价格表:{model: {"input": 美元/1M tokens, "output": 美元/1M tokens}}
     prices: Mapped[dict] = mapped_column(JSON, default=dict)
+    # 余额查询端点(可选):中转站自建端点时显式指定,留空则自动探测
+    balance_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # 静态优先级,数字越小越优先(P1 路由策略)
     priority: Mapped[int] = mapped_column(Integer, default=100)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)

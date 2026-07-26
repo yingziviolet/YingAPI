@@ -62,6 +62,7 @@ async def create_channel(
         models=payload.models,
         model_map=payload.model_map,
         prices=payload.prices,
+        balance_url=payload.balance_url,
         priority=payload.priority,
         enabled=payload.enabled,
     )
@@ -97,9 +98,9 @@ async def update_channel(
         raise HTTPException(status_code=404, detail="channel not found")
     data = payload.model_dump(exclude_unset=True)
     api_key = data.pop("api_key", None)
-    # Channel 没有可空列:显式传 null 一律拒绝(否则落库时 500)
+    # balance_url 可空(null = 清空回自动探测);其余列非空,显式 null 一律拒绝
     for field, value in data.items():
-        if value is None:
+        if value is None and field != "balance_url":
             raise HTTPException(status_code=422, detail=f"field '{field}' cannot be null")
     # 校验合并后的最终值:只改 models 或只改 prices 也可能造成键失配
     final_models = data.get("models", channel.models)
@@ -241,6 +242,47 @@ async def key_spend(key_id: int, session: AsyncSession = Depends(get_session)):
         "month_to_date_usd": round(spent, 6),
         "monthly_budget_usd": vkey.monthly_budget_usd,
     }
+
+
+# ---------- 渠道余额(用渠道自己的 key 调公开余额接口) ----------
+
+
+@router.get("/channels/{channel_id}/balance")
+async def channel_balance(
+    channel_id: int, request: Request, session: AsyncSession = Depends(get_session)
+):
+    from app.services.balance import fetch_balance
+
+    channel = await session.get(Channel, channel_id)
+    if channel is None:
+        raise HTTPException(status_code=404, detail="channel not found")
+    result = await fetch_balance(request.app.state.upstream_client, channel, request.app.state.fernet)
+    return {"channel_id": channel.id, "channel_name": channel.name, **result}
+
+
+@router.get("/balances")
+async def all_balances(request: Request, session: AsyncSession = Depends(get_session)):
+    """并发查所有启用渠道的余额;失败的渠道返回 ok=false,不影响其他渠道。"""
+    import asyncio
+
+    from app.services.balance import fetch_balance
+
+    channels = (
+        (await session.execute(select(Channel).where(Channel.enabled == True)))  # noqa: E712
+        .scalars()
+        .all()
+    )
+    client = request.app.state.upstream_client
+    fernet = request.app.state.fernet
+    results = await asyncio.gather(
+        *(fetch_balance(client, ch, fernet) for ch in channels), return_exceptions=True
+    )
+    out = []
+    for channel, result in zip(channels, results):
+        if isinstance(result, BaseException):
+            result = {"ok": False, "error": repr(result)}
+        out.append({"channel_id": channel.id, "channel_name": channel.name, **result})
+    return out
 
 
 # ---------- 熔断器观测(P2:状态机全程可观察) ----------

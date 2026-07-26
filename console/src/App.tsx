@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, clearToken, getToken, setToken } from './api'
+import { currentTheme, toggleTheme } from './theme'
 import Alerts from './pages/Alerts'
 import Channels from './pages/Channels'
 import Dashboard from './pages/Dashboard'
@@ -66,6 +67,12 @@ export default function App() {
             </button>
           ))}
         </nav>
+        <button
+          onClick={toggleTheme}
+          className="rounded-lg px-3 py-2 text-left text-xs text-slate-600 hover:bg-slate-800 hover:text-slate-400"
+        >
+          {currentTheme() === 'light' ? '🌙 深色模式' : '☀️ 浅色模式'}
+        </button>
         <button
           onClick={() => {
             clearToken()

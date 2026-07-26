@@ -12,6 +12,7 @@ class ChannelCreate(BaseModel):
     models: list[str] = Field(default_factory=list)
     model_map: dict[str, str] = Field(default_factory=dict)
     prices: dict[str, dict[str, float]] = Field(default_factory=dict)
+    balance_url: str | None = None
     priority: int = 100
     enabled: bool = True
 
@@ -24,6 +25,7 @@ class ChannelUpdate(BaseModel):
     models: list[str] | None = None
     model_map: dict[str, str] | None = None
     prices: dict[str, dict[str, float]] | None = None
+    balance_url: str | None = None
     priority: int | None = None
     enabled: bool | None = None
 
@@ -38,6 +40,7 @@ class ChannelOut(BaseModel):
     models: list[str]
     model_map: dict[str, str]
     prices: dict[str, dict[str, float]]
+    balance_url: str | None
     priority: int
     enabled: bool
     created_at: datetime

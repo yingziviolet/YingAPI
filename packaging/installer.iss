@@ -6,7 +6,10 @@
 ; 产物:packaging/output/LLMGateway-Setup-<版本>.exe
 
 #define AppName "LLM Gateway"
-#define AppVersion "1.0.0"
+; CI 里用 iscc /DAppVersion=x.y.z 按 git tag 覆盖;本地构建用默认值
+#ifndef AppVersion
+  #define AppVersion "1.0.0"
+#endif
 #define AppPublisher "yingziviolet"
 #define AppExeName "LLMGateway.exe"
 
