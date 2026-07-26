@@ -15,7 +15,8 @@ export default function TitleBar({ status }: { status?: React.ReactNode }) {
   }
 
   return (
-    <header className="titlebar-drag flex h-11 flex-none items-center gap-2 border-b border-line bg-surface-card px-3">
+    // pywebview-drag-region 是 pywebview 的官方拖拽区标记(WebView2 不认 app-region)
+    <header className="pywebview-drag-region titlebar-drag flex h-11 flex-none items-center gap-2 border-b border-line bg-surface-card px-3">
       <Logo />
       <span className="text-[13px] font-semibold tracking-tight text-ink-hi">LLM 网关</span>
       <span className="rounded-md bg-surface-sunken px-1.5 py-0.5 text-[10px] font-medium text-ink-low">

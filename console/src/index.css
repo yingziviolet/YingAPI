@@ -161,9 +161,11 @@ body {
   50%      { opacity: 0.4;  transform: scale(1.4); }
 }
 
-/* —— 标题栏拖拽(pywebview frameless) —— */
-.titlebar-drag { -webkit-app-region: drag; app-region: drag; }
+/* —— 标题栏拖拽(pywebview frameless);按钮区要排除掉,否则点不动 —— */
+.titlebar-drag { -webkit-app-region: drag; app-region: drag; user-select: none; }
 .titlebar-nodrag { -webkit-app-region: no-drag; app-region: no-drag; }
+.pywebview-drag-region .titlebar-nodrag,
+.pywebview-drag-region button { pointer-events: auto; }
 
 /* —— 载入编排 —— */
 @keyframes rise {

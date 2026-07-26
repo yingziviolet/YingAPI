@@ -21,6 +21,12 @@ datas.append((str(ROOT / "alembic.ini"), "."))
 hiddenimports = [
     "aiosqlite",
     "sqlalchemy.dialects.sqlite.aiosqlite",
+    # pywebview 的 Windows(WebView2/EdgeChromium)后端按需动态 import,必须显式声明
+    "webview",
+    "webview.platforms.winforms",
+    "webview.platforms.edgechromium",
+    "clr_loader",
+    "pythonnet",
     "uvicorn.logging",
     "uvicorn.loops.auto",
     "uvicorn.loops.asyncio",

@@ -157,19 +157,47 @@ def run_window(config: dict) -> bool:
     except ImportError:
         return False
     try:
+        # window 只能由闭包持有:pywebview 会遍历 js_api 对象的属性暴露给 JS,
+        # 若把 window 存成 api 的属性会沿 native 控件树无限递归(把日志刷爆)。
+        state: dict = {"window": None, "maximized": False}
+
+        class WindowApi:
+            """暴露给前端标题栏的窗口控制(window.pywebview.api.*)。只放方法。"""
+
+            def minimize(self):
+                w = state["window"]
+                if w:
+                    w.minimize()
+
+            def toggle_maximize(self):
+                w = state["window"]
+                if not w:
+                    return
+                if state["maximized"]:
+                    w.restore()
+                else:
+                    w.maximize()
+                state["maximized"] = not state["maximized"]
+
+            def close(self):
+                w = state["window"]
+                if w:
+                    w.destroy()
+
         # 控制台自带鉴权页;把 token 预置进 localStorage 免得每次手输
-        token_js = (
-            "try{localStorage.setItem('gw_admin_token', %r);}catch(e){}"
-            % config["token"]
-        )
+        token_js = "try{localStorage.setItem('gw_admin_token', %r);}catch(e){}" % config["token"]
         window = webview.create_window(
             WINDOW_TITLE,
             config["url"],
-            width=1280,
-            height=860,
-            min_size=(960, 640),
-            background_color="#f6f7f9",
+            width=1360,
+            height=900,
+            min_size=(1024, 680),
+            background_color="#f4f6fa",
+            frameless=True,   # 用控制台自绘的标题栏
+            easy_drag=False,  # 拖拽由 .pywebview-drag-region 标记
+            js_api=WindowApi(),
         )
+        state["window"] = window
 
         def on_loaded():
             try:

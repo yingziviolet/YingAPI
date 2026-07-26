@@ -11,7 +11,7 @@ Pop-Location
 
 Write-Host "[2/3] PyInstaller 打包…" -ForegroundColor Cyan
 Push-Location $root
-python -m pip install --quiet pyinstaller pystray pillow
+python -m pip install --quiet pyinstaller pywebview pystray pillow
 python -m PyInstaller packaging\gateway.spec --noconfirm --distpath dist --workpath build
 Pop-Location
 
