@@ -116,6 +116,28 @@ def make_upstream(state: dict) -> FastAPI:
             "usage": {"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9},
         }
 
+    @up.post("/v1/embeddings")
+    async def embeddings(request: Request):
+        state["embed_calls"] = state.get("embed_calls", 0) + 1
+        body = await request.json()
+        text = body["input"][0]
+        table = state.get("embeddings", {})
+        if text in table:
+            vec = table[text]
+        else:
+            # 确定性伪随机向量:不同文本近似正交,不会误命中
+            import hashlib
+            import random
+
+            seed = int.from_bytes(hashlib.sha256(text.encode()).digest()[:8], "big")
+            rng = random.Random(seed)
+            vec = [rng.uniform(-1, 1) for _ in range(32)]
+        return {
+            "object": "list",
+            "data": [{"object": "embedding", "index": 0, "embedding": vec}],
+            "model": body.get("model"),
+        }
+
     return up
 
 
@@ -133,6 +155,15 @@ async def gateway(tmp_path, upstream_state):
         admin_token="test-admin",
         cache_enabled=True,
         cache_ttl_seconds=3600,
+        # P2:语义缓存指向名为 embedder 的渠道(测试按需创建;不存在时静默降级)
+        semantic_cache_enabled=True,
+        embedding_channel="embedder",
+        semantic_threshold=0.9,
+        # P2:熔断参数调小,便于测试触发
+        cb_min_requests=2,
+        cb_error_threshold=0.5,
+        cb_open_seconds=30,
+        cb_half_open_probes=1,
     )
     app = create_app(settings)
     # 上游连接池整体替换为指向假上游的 ASGI transport

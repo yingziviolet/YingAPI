@@ -4,13 +4,17 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from app.api import admin as admin_api
 from app.api import v1 as v1_api
 from app.config import Settings, get_settings
 from app.db import build_engine, build_sessionmaker, create_all
+from app.metrics import Metrics
 from app.security import load_fernet
+from app.services.breaker import CircuitBreaker
+from app.services.ratelimit import build_rate_limiter
+from app.services.semantic_cache import SemanticCache
 from app.services.usage import Meter
 from app.trace import TraceIdMiddleware
 
@@ -32,10 +36,18 @@ def init_state(app: FastAPI, settings: Settings) -> None:
         )
     )
     app.state.meter = Meter(app.state.sessionmaker)
+    app.state.breaker = CircuitBreaker(settings)
+    app.state.rate_limiter = build_rate_limiter(settings)
+    app.state.metrics = Metrics()
+    # client_getter 延迟解引用:测试会整体替换 upstream_client
+    app.state.semantic_cache = SemanticCache(
+        settings, lambda: app.state.upstream_client, app.state.fernet
+    )
 
 
 async def dispose_state(app: FastAPI) -> None:
     await app.state.meter.drain()  # 排干在途计量,保证账不丢
+    await app.state.rate_limiter.aclose()
     await app.state.upstream_client.aclose()
     await app.state.engine.dispose()
 
@@ -77,6 +89,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/healthz")
     async def healthz():
         return {"status": "ok", "app": settings.app_name}
+
+    @app.get("/metrics")
+    async def metrics_endpoint():
+        from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+        from sqlalchemy import select
+
+        from app.metrics import update_circuit_gauges
+        from app.models import Channel as ChannelModel
+
+        # 抓取时刷新熔断状态 gauge(拉模型,状态即时)
+        async with app.state.sessionmaker() as session:
+            rows = (await session.execute(select(ChannelModel.id, ChannelModel.name))).all()
+        names = {cid: name for cid, name in rows}
+        update_circuit_gauges(app.state.metrics, app.state.breaker.snapshot(), names)
+        return Response(
+            content=generate_latest(app.state.metrics.registry), media_type=CONTENT_TYPE_LATEST
+        )
 
     return app
 

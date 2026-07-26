@@ -115,6 +115,8 @@ python -m pytest tests -q
 ## 路线图
 
 - [x] **P1** 透明代理:兼容入口、渠道注册表、流式透传、计量落库、精确缓存、管理 API
-- [ ] **P2** 语义缓存(pgvector)、熔断 + 半开探测、滑动窗口限流、Prometheus 指标
-- [ ] **P3** React 控制台:渠道面板、额度大盘、WebSocket live-tail、告警中心
-- [ ] **P4** 难度感知路由 + 质量回评、用量异常哨兵、日成本报告
+- [x] **P2** 语义缓存(embedding + 余弦相似度,精确未中才查)、渠道熔断器(滑动窗口错误率 → OPEN → 半开探测 → 恢复,控制台可观测/手动复位)、每 key 滑动窗口限流(Redis 可选,进程内兜底)、Prometheus `/metrics`
+- [ ] **P2.5** Anthropic Messages API 入口(`/v1/messages` + 协议翻译),Claude Code 等客户端配自有 key 走网关
+- [ ] **P3** React 控制台:渠道面板、额度大盘、WebSocket live-tail、告警中心、订阅用量面板(本地遥测,cockpit 式)
+- [ ] **P4** 难度感知路由 + 质量回评、用量异常哨兵、日成本报告、语义缓存 pgvector 索引化
+- 交付形态:服务器 Docker Compose;单机 Windows exe 安装包(PyInstaller + Inno Setup,SQLite,零外部依赖)

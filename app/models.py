@@ -50,6 +50,8 @@ class VirtualKey(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     # 月度预算(美元),空为不限
     monthly_budget_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # 每分钟请求数上限,空则用全局 GW_DEFAULT_RPM_LIMIT
+    rpm_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -88,6 +90,24 @@ class RequestLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, index=True
     )
+
+
+class SemanticCacheEntry(Base):
+    """语义缓存:请求文本 embedding -> 完整响应 JSON,余弦相似度匹配。
+
+    P2 用 JSON 列存向量 + 应用层余弦(两种数据库通吃);
+    P4 数据量上来后可平滑迁移到 pgvector 列 + 索引。
+    """
+
+    __tablename__ = "semantic_cache_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    model: Mapped[str] = mapped_column(String(128), index=True)
+    embedding: Mapped[list] = mapped_column(JSON)
+    response_json: Mapped[dict] = mapped_column(JSON)
+    hit_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
 class CacheEntry(Base):

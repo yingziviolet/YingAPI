@@ -47,11 +47,13 @@ class ChannelOut(BaseModel):
 class VirtualKeyCreate(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     monthly_budget_usd: float | None = Field(default=None, ge=0)
+    rpm_limit: int | None = Field(default=None, ge=1)
 
 
 class VirtualKeyUpdate(BaseModel):
     enabled: bool | None = None
     monthly_budget_usd: float | None = Field(default=None, ge=0)
+    rpm_limit: int | None = Field(default=None, ge=1)
 
 
 class VirtualKeyOut(BaseModel):
@@ -62,6 +64,7 @@ class VirtualKeyOut(BaseModel):
     key_masked: str
     enabled: bool
     monthly_budget_usd: float | None
+    rpm_limit: int | None
     created_at: datetime
 
 

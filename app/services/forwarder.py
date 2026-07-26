@@ -66,10 +66,18 @@ async def forward_non_stream(
     body: dict,
     settings: Settings,
     fernet: Fernet,
+    breaker=None,
 ) -> tuple[dict, Channel]:
-    """依次尝试渠道,返回 (上游响应 JSON, 命中的渠道)。全部失败抛 UpstreamError。"""
+    """依次尝试渠道,返回 (上游响应 JSON, 命中的渠道)。全部失败抛 UpstreamError。
+
+    breaker(可选):熔断 OPEN 的渠道直接跳过;每次尝试的成败会回写熔断窗口。
+    """
     last_error = "no channel available"
     for channel in channels:
+        if breaker is not None and not breaker.allow(channel.id):
+            last_error = f"channel[{channel.name}] circuit open"
+            logger.warning("failover: %s", last_error)
+            continue
         payload = dict(body)
         payload["model"] = upstream_model_for(channel, model)
         payload.pop("stream", None)
@@ -79,6 +87,8 @@ async def forward_non_stream(
         except InvalidToken:
             last_error = _decrypt_failure(channel)
             logger.error("failover: %s", last_error)
+            if breaker is not None:
+                breaker.record_failure(channel.id)
             continue
         try:
             resp = await client.post(
@@ -86,17 +96,24 @@ async def forward_non_stream(
             )
         except httpx.PoolTimeout as exc:
             # 池是全局共享的:换渠道必然再次超时,直接快速失败,别把 N 个渠道各烧一遍超时
+            # 本地池饱和不是渠道的错,不计入熔断窗口
             raise UpstreamError(503, POOL_EXHAUSTED_MSG) from exc
         except httpx.HTTPError as exc:
             last_error = f"channel[{channel.name}] transport error: {exc!r}"
             logger.warning("failover: %s", last_error)
+            if breaker is not None:
+                breaker.record_failure(channel.id)
             continue
         if resp.status_code in FAILOVER_STATUS:
             last_error = f"channel[{channel.name}] upstream status {resp.status_code}"
             logger.warning("failover: %s", last_error)
+            if breaker is not None:
+                breaker.record_failure(channel.id)
             continue
         if resp.status_code >= 400:
-            # 客户端请求本身的问题:透传上游错误,不再尝试其他渠道
+            # 客户端请求本身的问题:渠道是健康的(计成功),透传错误,不再尝试其他渠道
+            if breaker is not None:
+                breaker.record_success(channel.id)
             raise UpstreamError(
                 resp.status_code,
                 f"upstream rejected request ({resp.status_code})",
@@ -107,7 +124,11 @@ async def forward_non_stream(
         except ValueError:
             last_error = f"channel[{channel.name}] returned non-JSON body"
             logger.warning("failover: %s", last_error)
+            if breaker is not None:
+                breaker.record_failure(channel.id)
             continue
+        if breaker is not None:
+            breaker.record_success(channel.id)
         return data, channel
     raise UpstreamError(502, f"all channels failed, last error: {last_error}")
 
@@ -175,6 +196,7 @@ async def open_stream(
     body: dict,
     settings: Settings,
     fernet: Fernet,
+    breaker=None,
 ) -> tuple[httpx.Response, Channel, bool]:
     """依次尝试渠道打开 SSE 流。返回 (已就绪的上游响应, 渠道, 客户端是否自己要了 usage)。
 
@@ -184,6 +206,10 @@ async def open_stream(
     injected = settings.inject_stream_usage and not client_wants_usage
     last_error = "no channel available"
     for channel in channels:
+        if breaker is not None and not breaker.allow(channel.id):
+            last_error = f"channel[{channel.name}] circuit open"
+            logger.warning("failover(stream): %s", last_error)
+            continue
         payload = dict(body)
         payload["model"] = upstream_model_for(channel, model)
         payload["stream"] = True
@@ -196,10 +222,14 @@ async def open_stream(
             client, channel, payload, settings, fernet
         )
         if resp is not None:
+            if breaker is not None:
+                breaker.record_success(channel.id)
             return resp, channel, client_wants_usage
         if failover_reason is not None:
             last_error = failover_reason
             logger.warning("failover(stream): %s", last_error)
+            if breaker is not None:
+                breaker.record_failure(channel.id)
             continue
         assert client_err is not None
         if injected and client_err.status_code == 400:
@@ -215,13 +245,21 @@ async def open_stream(
                     "channel[%s] rejected injected stream_options; retried without (usage will be estimated)",
                     channel.name,
                 )
+                if breaker is not None:
+                    breaker.record_success(channel.id)
                 return resp2, channel, client_wants_usage
             if failover_reason2 is not None:
                 last_error = failover_reason2
                 logger.warning("failover(stream): %s", last_error)
+                if breaker is not None:
+                    breaker.record_failure(channel.id)
                 continue
             assert client_err2 is not None
+            if breaker is not None:
+                breaker.record_success(channel.id)
             raise client_err2
+        if breaker is not None:
+            breaker.record_success(channel.id)
         raise client_err
     raise UpstreamError(502, f"all channels failed, last error: {last_error}")
 

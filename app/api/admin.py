@@ -175,6 +175,7 @@ async def create_key(payload: VirtualKeyCreate, session: AsyncSession = Depends(
         key_hash=hash_virtual_key(raw),
         key_masked=mask_key(raw),
         monthly_budget_usd=payload.monthly_budget_usd,
+        rpm_limit=payload.rpm_limit,
     )
     session.add(vkey)
     await session.commit()
@@ -185,6 +186,7 @@ async def create_key(payload: VirtualKeyCreate, session: AsyncSession = Depends(
         key_masked=vkey.key_masked,
         enabled=vkey.enabled,
         monthly_budget_usd=vkey.monthly_budget_usd,
+        rpm_limit=vkey.rpm_limit,
         created_at=vkey.created_at,
         key=raw,  # 原文仅此一次
     )
@@ -233,6 +235,26 @@ async def key_spend(key_id: int, session: AsyncSession = Depends(get_session)):
     }
 
 
+# ---------- 熔断器观测(P2:状态机全程可观察) ----------
+
+
+@router.get("/breakers")
+async def breaker_states(request: Request, session: AsyncSession = Depends(get_session)):
+    snapshot = request.app.state.breaker.snapshot()
+    rows = (await session.execute(select(Channel.id, Channel.name))).all()
+    names = {cid: name for cid, name in rows}
+    return [
+        {"channel_id": cid, "channel_name": names.get(cid, str(cid)), **info}
+        for cid, info in snapshot.items()
+    ]
+
+
+@router.post("/breakers/{channel_id}/reset")
+async def reset_breaker(channel_id: int, request: Request):
+    request.app.state.breaker.reset(channel_id)
+    return {"channel_id": channel_id, "state": "closed"}
+
+
 # ---------- 统计与日志 ----------
 
 
@@ -262,6 +284,32 @@ async def stats_daily(
     days: int = Query(default=7, ge=1, le=90), session: AsyncSession = Depends(get_session)
 ):
     return await stats_svc.daily_series(session, days)
+
+
+@router.get("/stats/cache")
+async def stats_cache(session: AsyncSession = Depends(get_session)):
+    """缓存成绩单:精确/语义两层的条目数与累计命中(简历上最漂亮的数字来源)。"""
+    from sqlalchemy import func
+
+    from app.models import CacheEntry, SemanticCacheEntry
+
+    exact_count, exact_hits = (
+        await session.execute(
+            select(func.count(CacheEntry.id), func.coalesce(func.sum(CacheEntry.hit_count), 0))
+        )
+    ).one()
+    sem_count, sem_hits = (
+        await session.execute(
+            select(
+                func.count(SemanticCacheEntry.id),
+                func.coalesce(func.sum(SemanticCacheEntry.hit_count), 0),
+            )
+        )
+    ).one()
+    return {
+        "exact": {"entries": exact_count, "total_hits": int(exact_hits)},
+        "semantic": {"entries": sem_count, "total_hits": int(sem_hits)},
+    }
 
 
 @router.get("/logs", response_model=list[RequestLogOut])

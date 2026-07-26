@@ -13,6 +13,7 @@ from app.errors import UpstreamError, openai_error
 from app.models import VirtualKey
 from app.services import cache as cache_svc
 from app.services import forwarder, router as routing, stats as stats_svc, usage as usage_svc
+from app.services import semantic_cache as semantic_svc
 from app.trace import current_trace_id
 
 router = APIRouter(prefix="/v1", tags=["data-plane"])
@@ -129,6 +130,20 @@ async def chat_completions(
     if stream_options is not None and not isinstance(stream_options, dict):
         return openai_error(400, "'stream_options' must be an object")
 
+    metrics = app.state.metrics
+
+    # 滑动窗口限流(每 key 每分钟请求数;key 未配置用全局默认)
+    rpm_limit = vkey.rpm_limit if vkey.rpm_limit is not None else settings.default_rpm_limit
+    decision = await app.state.rate_limiter.check(vkey.id, rpm_limit)
+    if not decision.allowed:
+        metrics.ratelimit_rejections_total.labels(key_name=vkey.name).inc()
+        return openai_error(
+            429,
+            f"rate limit exceeded for key '{vkey.name}' ({decision.limit} requests/min)",
+            err_type="rate_limit_error",
+            code="rate_limit_exceeded",
+        )
+
     # 预算校验:月度花费 >= 预算即拒绝。软预算语义:计量异步落库,非流式滞后为秒级,
     # 流式请求要到流结束才计量(最长 upstream_timeout_read),并发长流可短暂超支
     if vkey.monthly_budget_usd is not None:
@@ -151,36 +166,73 @@ async def chat_completions(
             **extra,
         )
 
-    # ---- 精确匹配缓存 ----
+    # ---- 缓存:精确匹配优先,未中再查语义缓存(embedding 调用有成本) ----
     use_cache = cache_svc.cacheable(body, settings)
     cache_key = cache_svc.make_cache_key(body) if use_cache else None
+    semantic = app.state.semantic_cache
+    request_embedding: list[float] | None = None
+
+    def _serve_cached(
+        cached: dict, cache_label: str, usage_source: str, extra_headers: dict | None = None
+    ):
+        pt, ct, tt = usage_svc.extract_usage(cached)
+        duration_s = perf_counter() - started_at
+        meter_common(
+            channel_id=None,
+            upstream_model=None,
+            cache_hit=True,
+            status="cache_hit",
+            status_code=200,
+            prompt_tokens=pt,
+            completion_tokens=ct,
+            total_tokens=tt,
+            usage_source=usage_source,
+            cost_usd=0.0,
+            latency_ms=int(duration_s * 1000),
+        )
+        metrics.record_request(
+            model=model,
+            channel="(cache)",
+            status="cache_hit",
+            cache=cache_label,
+            stream=stream,
+            duration_s=duration_s,
+            prompt_tokens=pt,
+            completion_tokens=ct,
+        )
+        headers = {"X-Gateway-Cache": cache_label, "X-Trace-Id": trace_id, **(extra_headers or {})}
+        if stream:
+            client_wants_usage = bool((stream_options or {}).get("include_usage"))
+            return StreamingResponse(
+                iter(_cache_stream_chunks(cached, include_usage=client_wants_usage)),
+                media_type="text/event-stream",
+                headers=headers,
+            )
+        return JSONResponse(cached, headers=headers)
+
     if cache_key:
         cached = await cache_svc.get_cached(session, cache_key)
         if cached is not None:
-            pt, ct, tt = usage_svc.extract_usage(cached)
-            latency_ms = int((perf_counter() - started_at) * 1000)
-            meter_common(
-                channel_id=None,
-                upstream_model=None,
-                cache_hit=True,
-                status="cache_hit",
-                status_code=200,
-                prompt_tokens=pt,
-                completion_tokens=ct,
-                total_tokens=tt,
-                usage_source="cache",
-                cost_usd=0.0,
-                latency_ms=latency_ms,
-            )
-            headers = {"X-Gateway-Cache": "hit", "X-Trace-Id": trace_id}
-            if stream:
-                client_wants_usage = bool((stream_options or {}).get("include_usage"))
-                return StreamingResponse(
-                    iter(_cache_stream_chunks(cached, include_usage=client_wants_usage)),
-                    media_type="text/event-stream",
-                    headers=headers,
-                )
-            return JSONResponse(cached, headers=headers)
+            metrics.cache_events_total.labels(kind="exact", outcome="hit").inc()
+            return _serve_cached(cached, "hit", "cache")
+        metrics.cache_events_total.labels(kind="exact", outcome="miss").inc()
+        # 语义缓存:精确未中才走(先 embed 再余弦匹配;embedding 失败静默降级)
+        if semantic.enabled():
+            text = semantic_svc.request_text(body)
+            if text:
+                request_embedding = await semantic.embed(session, text)
+            if request_embedding is not None:
+                found = await semantic.lookup(session, model, request_embedding)
+                if found is not None:
+                    response_json, score = found
+                    metrics.cache_events_total.labels(kind="semantic", outcome="hit").inc()
+                    return _serve_cached(
+                        response_json,
+                        "semantic-hit",
+                        "semantic-cache",
+                        {"X-Gateway-Similarity": str(score)},
+                    )
+                metrics.cache_events_total.labels(kind="semantic", outcome="miss").inc()
 
     # ---- 路由:静态优先级 failover 链 ----
     channels = await routing.candidate_channels(session, model)
@@ -197,17 +249,22 @@ async def chat_completions(
     if not stream:
         try:
             data, channel = await forwarder.forward_non_stream(
-                client, channels, model, body, settings, fernet
+                client, channels, model, body, settings, fernet, breaker=app.state.breaker
             )
         except UpstreamError as exc:
+            duration_s = perf_counter() - started_at
             meter_common(
                 channel_id=None,
                 upstream_model=None,
                 status="error",
                 status_code=exc.status_code,
                 usage_source="none",
-                latency_ms=int((perf_counter() - started_at) * 1000),
+                latency_ms=int(duration_s * 1000),
                 error=exc.message,
+            )
+            metrics.record_request(
+                model=model, channel="-", status="error",
+                cache="miss" if use_cache else "skip", stream=False, duration_s=duration_s,
             )
             if exc.body and isinstance(exc.body.get("error"), dict):
                 return JSONResponse(exc.body, status_code=exc.status_code)
@@ -224,6 +281,7 @@ async def chat_completions(
             content = (choices[0].get("message") or {}).get("content") or ""
         pt, ct, tt, usage_source = usage_svc.finalize_usage(pt, ct, tt, body, content)
         cost = usage_svc.compute_cost(channel, model, pt, ct)
+        duration_s = perf_counter() - started_at
         meter_common(
             channel_id=channel.id,
             upstream_model=upstream_model,
@@ -234,10 +292,17 @@ async def chat_completions(
             total_tokens=tt,
             usage_source=usage_source,
             cost_usd=cost,
-            latency_ms=int((perf_counter() - started_at) * 1000),
+            latency_ms=int(duration_s * 1000),
+        )
+        metrics.record_request(
+            model=model, channel=channel.name, status="ok",
+            cache="miss" if use_cache else "skip", stream=False, duration_s=duration_s,
+            prompt_tokens=pt, completion_tokens=ct, cost_usd=cost,
         )
         if cache_key:
             await cache_svc.put_cached(session, cache_key, model, data, settings)
+        if request_embedding is not None:
+            await semantic.store(session, model, request_embedding, data)
         return JSONResponse(
             data, headers={**common_headers, "X-Gateway-Channel": channel.name}
         )
@@ -245,17 +310,22 @@ async def chat_completions(
     # ---- 流式 ----
     try:
         resp, channel, client_wants_usage = await forwarder.open_stream(
-            client, channels, model, body, settings, fernet
+            client, channels, model, body, settings, fernet, breaker=app.state.breaker
         )
     except UpstreamError as exc:
+        duration_s = perf_counter() - started_at
         meter_common(
             channel_id=None,
             upstream_model=None,
             status="error",
             status_code=exc.status_code,
             usage_source="none",
-            latency_ms=int((perf_counter() - started_at) * 1000),
+            latency_ms=int(duration_s * 1000),
             error=exc.message,
+        )
+        metrics.record_request(
+            model=model, channel="-", status="error",
+            cache="miss" if use_cache else "skip", stream=True, duration_s=duration_s,
         )
         if exc.body and isinstance(exc.body.get("error"), dict):
             return JSONResponse(exc.body, status_code=exc.status_code)
@@ -269,6 +339,8 @@ async def chat_completions(
         pt, ct, tt, usage_source = usage_svc.finalize_usage(
             pt, ct, tt, body, "x" * stats.completion_chars
         )
+        cost = usage_svc.compute_cost(channel, model, pt, ct)
+        duration_s = perf_counter() - started_at
         meter_common(
             channel_id=channel.id,
             upstream_model=upstream_model,
@@ -278,11 +350,20 @@ async def chat_completions(
             completion_tokens=ct,
             total_tokens=tt,
             usage_source=usage_source,
-            cost_usd=usage_svc.compute_cost(channel, model, pt, ct),
-            latency_ms=int((perf_counter() - started_at) * 1000),
+            cost_usd=cost,
+            latency_ms=int(duration_s * 1000),
             first_token_ms=stats.first_token_ms,
             error=stats.error,
         )
+        metrics.record_request(
+            model=model, channel=channel.name, status=status,
+            cache="miss" if use_cache else "skip", stream=True, duration_s=duration_s,
+            prompt_tokens=pt, completion_tokens=ct, cost_usd=cost,
+            first_token_s=stats.first_token_ms / 1000 if stats.first_token_ms is not None else None,
+        )
+        # 流中途上游断掉:计入该渠道的熔断窗口(打开流时的成功已计,这里补记失败)
+        if stats.error and stats.error.startswith("upstream stream error"):
+            app.state.breaker.record_failure(channel.id)
 
     # 客户端在上游流就绪前就断了:立刻关闭上游、计量、返回(响应不会被读到)
     if await request.is_disconnected():
