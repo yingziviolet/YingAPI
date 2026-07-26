@@ -9,3 +9,10 @@ gateway.db
 
 console/dist/
 console/node_modules/
+
+dist/
+dist-debug/
+build/
+build-debug/
+packaging/output/
+*.spec.bak

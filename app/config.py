@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="GW_", env_file=".env", extra="ignore")
 
     app_name: str = "llm-gateway"
+    # React 控制台构建产物目录;为空时用仓库内 console/dist(exe 打包时由启动器指定)
+    console_dir: str = ""
 
     # 数据库:开发默认 SQLite,生产用 postgresql+asyncpg://...
     database_url: str = "sqlite+aiosqlite:///./gateway.db"

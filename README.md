@@ -63,6 +63,16 @@ curl -N http://localhost:8080/v1/chat/completions -H "Authorization: Bearer sk-g
 curl -s "http://localhost:8080/admin/stats/overview?days=7" -H "Authorization: Bearer $GW_ADMIN_TOKEN"
 ```
 
+## Windows 单机版(exe)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\build.ps1
+```
+
+三步产物:控制台前端 → PyInstaller(`dist\LLMGateway\LLMGateway.exe`,免安装直接双击)→ Inno Setup 安装包(`packaging\output\`,机器上装了 Inno Setup 6 才生成)。
+
+单机版行为:双击启动 → 系统托盘图标(打开控制台/复制 token/数据目录/退出)→ 自动开浏览器进控制台。数据(SQLite/密钥/token/日志)全部在 `%LOCALAPPDATA%\LLMGateway`,卸载不删用户数据,零外部依赖。
+
 ## 部署(Docker Compose,Postgres + Redis)
 
 ```bash

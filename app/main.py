@@ -133,7 +133,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(ws_api.router)
 
     # React 控制台构建产物(存在才挂载:后端可独立运行)
-    console_dist = Path(__file__).resolve().parent.parent / "console" / "dist"
+    console_dist = (
+        Path(settings.console_dir)
+        if settings.console_dir
+        else Path(__file__).resolve().parent.parent / "console" / "dist"
+    )
     if console_dist.exists():
         from fastapi.responses import RedirectResponse
         from fastapi.staticfiles import StaticFiles
