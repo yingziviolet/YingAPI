@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from app.api import admin as admin_api
+from app.api import anthropic as anthropic_api
 from app.api import v1 as v1_api
 from app.config import Settings, get_settings
 from app.db import build_engine, build_sessionmaker, create_all
@@ -76,12 +77,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     init_state(app, settings)
     app.add_middleware(TraceIdMiddleware)
     app.include_router(v1_api.router)
+    app.include_router(anthropic_api.router)
     app.include_router(admin_api.router)
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
-        # 数据面(/v1)统一 OpenAI 错误格式;控制面保持 FastAPI 默认 {"detail": ...}
-        if request.url.path.startswith("/v1"):
+        # 数据面错误格式按协议区分:/v1/messages* 用 Anthropic 格式,
+        # 其余 /v1 用 OpenAI 格式;控制面保持 FastAPI 默认 {"detail": ...}
+        path = request.url.path
+        if path.startswith("/v1/messages"):
+            detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+            err_type = "authentication_error" if exc.status_code == 401 else "invalid_request_error"
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={
+                    "type": "error",
+                    "error": {"type": err_type, "message": detail.get("message", "error")},
+                },
+            )
+        if path.startswith("/v1"):
             detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
             return JSONResponse(status_code=exc.status_code, content={"error": detail})
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})

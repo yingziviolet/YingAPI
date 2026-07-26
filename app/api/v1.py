@@ -27,10 +27,20 @@ async def list_models(
 ):
     models = await routing.all_public_models(session)
     created = int(time.time())
+    # 同一路径同时服务两种协议的客户端:OpenAI 客户端读 object/created/owned_by,
+    # Anthropic 客户端(Claude Code 模型发现)读 type/display_name;多余字段互相忽略
     return {
         "object": "list",
+        "has_more": False,
         "data": [
-            {"id": m, "object": "model", "created": created, "owned_by": "gateway"}
+            {
+                "id": m,
+                "object": "model",
+                "type": "model",
+                "display_name": m,
+                "created": created,
+                "owned_by": "gateway",
+            }
             for m in models
         ],
     }

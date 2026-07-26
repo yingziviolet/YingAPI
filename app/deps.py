@@ -25,8 +25,8 @@ def _bearer_token(request: Request) -> str | None:
 async def get_virtual_key(
     request: Request, session: AsyncSession = Depends(get_session)
 ) -> VirtualKey:
-    """数据面鉴权:Authorization: Bearer sk-gw-xxx。失败返回 OpenAI 风格 401。"""
-    token = _bearer_token(request)
+    """数据面鉴权:Authorization: Bearer sk-gw-xxx 或 x-api-key(Anthropic 客户端习惯)。"""
+    token = _bearer_token(request) or request.headers.get("x-api-key", "").strip() or None
     if not token or not token.startswith(VIRTUAL_KEY_PREFIX):
         raise HTTPException(
             status_code=401,
