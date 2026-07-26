@@ -9,8 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
 
 from app.deps import get_session, require_admin
-from app.models import Channel, RequestLog, VirtualKey
+from app.models import Alert, Channel, RequestLog, VirtualKey
 from app.schemas.admin import (
+    AlertOut,
     ChannelCreate,
     ChannelOut,
     ChannelUpdate,
@@ -260,6 +261,71 @@ async def breaker_states(request: Request, session: AsyncSession = Depends(get_s
 async def reset_breaker(channel_id: int, request: Request):
     request.app.state.breaker.reset(channel_id)
     return {"channel_id": channel_id, "state": "closed"}
+
+
+# ---------- 告警中心(P3.5) ----------
+
+
+@router.get("/alerts", response_model=list[AlertOut])
+async def list_alerts(
+    limit: int = Query(default=100, ge=1, le=500),
+    include_acked: bool = Query(default=False),
+    session: AsyncSession = Depends(get_session),
+):
+    stmt = select(Alert).order_by(Alert.id.desc()).limit(limit)
+    if not include_acked:
+        stmt = stmt.where(Alert.acknowledged == False)  # noqa: E712
+    return (await session.execute(stmt)).scalars().all()
+
+
+@router.post("/alerts/{alert_id}/ack", response_model=AlertOut)
+async def ack_alert(alert_id: int, session: AsyncSession = Depends(get_session)):
+    alert = await session.get(Alert, alert_id)
+    if alert is None:
+        raise HTTPException(status_code=404, detail="alert not found")
+    alert.acknowledged = True
+    await session.commit()
+    await session.refresh(alert)
+    return alert
+
+
+@router.post("/alerts/ack-all")
+async def ack_all_alerts(session: AsyncSession = Depends(get_session)):
+    from sqlalchemy import update as sa_update
+
+    result = await session.execute(
+        sa_update(Alert).where(Alert.acknowledged == False).values(acknowledged=True)  # noqa: E712
+    )
+    await session.commit()
+    return {"acknowledged": result.rowcount or 0}
+
+
+@router.post("/sentinel/run")
+async def run_sentinel_now(request: Request):
+    """手动触发一轮哨兵巡检(演示/排障用)。"""
+    sentinel = getattr(request.app.state, "sentinel", None)
+    if sentinel is None:
+        raise HTTPException(status_code=400, detail="sentinel disabled")
+    await sentinel.run_once()
+    return {"ok": True}
+
+
+# ---------- 订阅用量面板(P3.5,cockpit:只读本机 Claude Code 记录) ----------
+
+
+@router.get("/subscription-usage")
+async def subscription_usage(
+    request: Request, days: int = Query(default=7, ge=1, le=90)
+):
+    import asyncio
+
+    from app.services import subscription
+
+    settings = request.app.state.settings
+    if not settings.subscription_panel_enabled:
+        return {"available": False, "reason": "GW_SUBSCRIPTION_PANEL_ENABLED=false"}
+    # 文件扫描是同步 IO,丢线程池,不阻塞事件循环
+    return await asyncio.to_thread(subscription.scan_usage, settings, days)
 
 
 # ---------- 统计与日志 ----------

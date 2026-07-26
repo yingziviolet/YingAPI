@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
 import { api, clearToken, getToken, setToken } from './api'
+import Alerts from './pages/Alerts'
 import Channels from './pages/Channels'
 import Dashboard from './pages/Dashboard'
 import Insights from './pages/Insights'
 import Keys from './pages/Keys'
 import LiveTail from './pages/LiveTail'
+import Subscription from './pages/Subscription'
 import { Button, Input } from './components/ui'
 
-type Tab = 'dashboard' | 'channels' | 'keys' | 'livetail' | 'insights'
+type Tab = 'dashboard' | 'channels' | 'keys' | 'livetail' | 'insights' | 'alerts' | 'subscription'
 
 const tabs: { key: Tab; label: string; icon: string }[] = [
   { key: 'dashboard', label: '额度大盘', icon: '📊' },
@@ -15,6 +17,8 @@ const tabs: { key: Tab; label: string; icon: string }[] = [
   { key: 'keys', label: '虚拟 Key', icon: '🔑' },
   { key: 'livetail', label: '实时请求流', icon: '📡' },
   { key: 'insights', label: '智能层成绩单', icon: '🧠' },
+  { key: 'alerts', label: '告警中心', icon: '🚨' },
+  { key: 'subscription', label: '订阅用量', icon: '🛰️' },
 ]
 
 export default function App() {
@@ -81,6 +85,8 @@ export default function App() {
         {tab === 'keys' && <Keys />}
         {tab === 'livetail' && <LiveTail />}
         {tab === 'insights' && <Insights />}
+        {tab === 'alerts' && <Alerts />}
+        {tab === 'subscription' && <Subscription />}
       </main>
     </div>
   )

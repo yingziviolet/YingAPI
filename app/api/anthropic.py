@@ -17,6 +17,7 @@ from app.deps import get_session, get_virtual_key
 from app.errors import UpstreamError
 from app.models import VirtualKey
 from app.services import cache as cache_svc
+from app.services import downgrade as downgrade_svc
 from app.services import forwarder, router as routing, stats as stats_svc, usage as usage_svc
 from app.services import semantic_cache as semantic_svc
 from app.services.anthropic_translate import (
@@ -116,6 +117,12 @@ async def messages(
                 err_type="rate_limit_error",
             )
 
+    # 难度感知路由(P4):简单请求确定性降级
+    routed_model = model
+    downgraded_to = downgrade_svc.downgrade_target(openai_body, settings)
+    if downgraded_to:
+        routed_model = downgraded_to
+
     def meter_common(**extra):
         meter.record(
             trace_id=trace_id, virtual_key_id=vkey.id, model=model, stream=stream, **extra
@@ -174,10 +181,12 @@ async def messages(
                     )
                 metrics.cache_events_total.labels(kind="semantic", outcome="miss").inc()
 
-    channels = await routing.candidate_channels(session, model)
+    channels = await routing.candidate_channels(session, routed_model)
     if not channels:
         return anthropic_error(
-            404, f"model '{model}' is not served by any enabled channel", err_type="not_found_error"
+            404,
+            f"model '{routed_model}' is not served by any enabled channel",
+            err_type="not_found_error",
         )
     fernet = app.state.fernet
     client = app.state.upstream_client
@@ -186,7 +195,8 @@ async def messages(
     if not stream:
         try:
             data, channel = await forwarder.forward_non_stream(
-                client, channels, model, openai_body, settings, fernet, breaker=app.state.breaker, metrics=metrics
+                client, channels, routed_model, openai_body, settings, fernet,
+                breaker=app.state.breaker, metrics=metrics,
             )
         except UpstreamError as exc:
             duration_s = perf_counter() - started_at
@@ -201,7 +211,7 @@ async def messages(
             )
             return _upstream_anthropic_error(exc)
 
-        upstream_model = routing.upstream_model_for(channel, model)
+        upstream_model = routing.upstream_model_for(channel, routed_model)
         if isinstance(data, dict) and isinstance(data.get("model"), str):
             data["model"] = model
         pt, ct, tt = usage_svc.extract_usage(data)
@@ -210,10 +220,11 @@ async def messages(
         if choices:
             content = (choices[0].get("message") or {}).get("content") or ""
         pt, ct, tt, usage_source = usage_svc.finalize_usage(pt, ct, tt, openai_body, content)
-        cost = usage_svc.compute_cost(channel, model, pt, ct)
+        cost = usage_svc.compute_cost(channel, routed_model, pt, ct)
         duration_s = perf_counter() - started_at
         meter_common(
-            channel_id=channel.id, upstream_model=upstream_model, status="ok", status_code=200,
+            channel_id=channel.id, upstream_model=upstream_model, downgraded_to=downgraded_to,
+            status="ok", status_code=200,
             prompt_tokens=pt, completion_tokens=ct, total_tokens=tt, usage_source=usage_source,
             cost_usd=cost, latency_ms=int(duration_s * 1000),
         )
@@ -234,13 +245,15 @@ async def messages(
                 "X-Gateway-Cache": "miss" if use_cache else "skip",
                 "X-Gateway-Channel": channel.name,
                 "X-Trace-Id": trace_id,
+                **({"X-Gateway-Downgraded": downgraded_to} if downgraded_to else {}),
             },
         )
 
     # ---- 流式:消费上游 OpenAI SSE,翻译成 Anthropic 事件序列 ----
     try:
         resp, channel, _ = await forwarder.open_stream(
-            client, channels, model, openai_body, settings, fernet, breaker=app.state.breaker, metrics=metrics
+            client, channels, routed_model, openai_body, settings, fernet,
+            breaker=app.state.breaker, metrics=metrics,
         )
     except UpstreamError as exc:
         duration_s = perf_counter() - started_at
@@ -255,7 +268,7 @@ async def messages(
         )
         return _upstream_anthropic_error(exc)
 
-    upstream_model = routing.upstream_model_for(channel, model)
+    upstream_model = routing.upstream_model_for(channel, routed_model)
     translator = AnthropicStreamTranslator(
         model, input_tokens_estimate=usage_svc.estimate_prompt_tokens(openai_body)
     )
@@ -270,10 +283,11 @@ async def messages(
         pt, ct, tt, usage_source = usage_svc.finalize_usage(
             pt, ct, tt, openai_body, "x" * translator.output_chars
         )
-        cost = usage_svc.compute_cost(channel, model, pt, ct)
+        cost = usage_svc.compute_cost(channel, routed_model, pt, ct)
         duration_s = perf_counter() - started_at
         meter_common(
-            channel_id=channel.id, upstream_model=upstream_model, status=status, status_code=200,
+            channel_id=channel.id, upstream_model=upstream_model, downgraded_to=downgraded_to,
+            status=status, status_code=200,
             prompt_tokens=pt, completion_tokens=ct, total_tokens=tt, usage_source=usage_source,
             cost_usd=cost, latency_ms=int(duration_s * 1000),
             first_token_ms=first_token_ms[0] if first_token_ms else None,
@@ -355,6 +369,7 @@ async def messages(
             "X-Gateway-Channel": channel.name,
             "X-Gateway-Cache": "skip",
             "X-Trace-Id": trace_id,
+            **({"X-Gateway-Downgraded": downgraded_to} if downgraded_to else {}),
         },
         background=BackgroundTask(cleanup_if_never_started),
     )

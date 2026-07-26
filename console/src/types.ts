@@ -81,6 +81,49 @@ export interface KeySpend {
   monthly_budget_usd: number | null
 }
 
+export interface AlertItem {
+  id: number
+  kind: string
+  severity: 'info' | 'warning' | 'critical'
+  title: string
+  detail: string
+  acknowledged: boolean
+  created_at: string
+}
+
+export interface SubscriptionUsage {
+  available: boolean
+  reason?: string
+  window_days?: number
+  files_scanned?: number
+  totals?: {
+    messages: number
+    input_tokens: number
+    output_tokens: number
+    cache_read_tokens: number
+    cache_creation_tokens: number
+  }
+  est_api_cost_usd?: number
+  daily?: {
+    date: string
+    messages: number
+    input_tokens: number
+    output_tokens: number
+    cache_read_tokens: number
+    cache_creation_tokens: number
+    est_cost_usd: number
+  }[]
+  by_model?: {
+    model: string
+    messages: number
+    input_tokens: number
+    output_tokens: number
+    cache_read_tokens: number
+    cache_creation_tokens: number
+    est_cost_usd: number
+  }[]
+}
+
 export interface RequestLogItem {
   id?: number
   ts?: number

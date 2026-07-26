@@ -83,6 +83,8 @@ class RequestLog(Base):
     total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # usage 来源:upstream(上游返回) / estimated(字符数估算) / none
     usage_source: Mapped[str] = mapped_column(String(16), default="none")
+    # 难度感知路由:请求被降级到的对外模型名(空 = 未降级)
+    downgraded_to: Mapped[str | None] = mapped_column(String(128), nullable=True)
     cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     first_token_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -90,6 +92,23 @@ class RequestLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, index=True
     )
+
+
+class Alert(Base):
+    """告警事件:哨兵产出,控制台展示/确认,可选 webhook 推送。"""
+
+    __tablename__ = "alerts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # budget / breaker / anomaly / error_rate / daily_report
+    kind: Mapped[str] = mapped_column(String(24), index=True)
+    severity: Mapped[str] = mapped_column(String(12), default="warning")  # info/warning/critical
+    title: Mapped[str] = mapped_column(String(200))
+    detail: Mapped[str] = mapped_column(Text, default="")
+    # 去重键:同一事件只告警一次(如 budget-80-{key_id}-{month})
+    dedupe_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    acknowledged: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
 class SemanticCacheEntry(Base):

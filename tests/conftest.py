@@ -164,6 +164,8 @@ async def gateway(tmp_path, upstream_state):
         cb_error_threshold=0.5,
         cb_open_seconds=30,
         cb_half_open_probes=1,
+        # P3.5:测试不跑哨兵后台循环(需要时直接实例化 Sentinel)
+        sentinel_interval_seconds=0,
     )
     app = create_app(settings)
     # 上游连接池整体替换为指向假上游的 ASGI transport

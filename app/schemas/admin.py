@@ -73,6 +73,18 @@ class VirtualKeyCreated(VirtualKeyOut):
     key: str  # 原文仅创建时返回一次
 
 
+class AlertOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    kind: str
+    severity: str
+    title: str
+    detail: str
+    acknowledged: bool
+    created_at: datetime
+
+
 class RequestLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -90,6 +102,7 @@ class RequestLogOut(BaseModel):
     completion_tokens: int | None
     total_tokens: int | None
     usage_source: str
+    downgraded_to: str | None = None
     cost_usd: float | None
     latency_ms: int | None
     first_token_ms: int | None

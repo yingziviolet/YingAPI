@@ -103,12 +103,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if settings.auto_create_tables:
             await create_all(app.state.engine)
         purge_task = asyncio.create_task(_cache_purge_loop(app, settings))
+        sentinel_task = None
+        if settings.sentinel_interval_seconds > 0:
+            from app.services.sentinel import Sentinel
+
+            app.state.sentinel = Sentinel(
+                settings, app.state.sessionmaker, app.state.breaker, app.state.upstream_client
+            )
+            sentinel_task = asyncio.create_task(app.state.sentinel.run_forever())
         yield
-        purge_task.cancel()
-        try:
-            await purge_task
-        except asyncio.CancelledError:
-            pass
+        for task in (purge_task, sentinel_task):
+            if task is None:
+                continue
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
         await dispose_state(app)
         app.state.engine = None
 

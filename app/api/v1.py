@@ -12,6 +12,7 @@ from app.deps import get_session, get_virtual_key
 from app.errors import UpstreamError, openai_error
 from app.models import VirtualKey
 from app.services import cache as cache_svc
+from app.services import downgrade as downgrade_svc
 from app.services import forwarder, router as routing, stats as stats_svc, usage as usage_svc
 from app.services import semantic_cache as semantic_svc
 from app.trace import current_trace_id
@@ -168,6 +169,12 @@ async def chat_completions(
                 code="budget_exhausted",
             )
 
+    # ---- 难度感知路由(P4):简单请求确定性降级到便宜模型 ----
+    routed_model = model
+    downgraded_to = downgrade_svc.downgrade_target(body, settings)
+    if downgraded_to:
+        routed_model = downgraded_to
+
     def meter_common(**extra):
         meter.record(
             trace_id=trace_id,
@@ -246,22 +253,27 @@ async def chat_completions(
                     )
                 metrics.cache_events_total.labels(kind="semantic", outcome="miss").inc()
 
-    # ---- 路由:静态优先级 failover 链 ----
-    channels = await routing.candidate_channels(session, model)
+    # ---- 路由:静态优先级 failover 链(降级后按目标模型选渠道) ----
+    channels = await routing.candidate_channels(session, routed_model)
     if not channels:
         return openai_error(
-            404, f"model '{model}' is not served by any enabled channel", code="model_not_found"
+            404,
+            f"model '{routed_model}' is not served by any enabled channel",
+            code="model_not_found",
         )
     fernet = app.state.fernet
     client = app.state.upstream_client
 
     common_headers = {"X-Gateway-Cache": "miss" if use_cache else "skip", "X-Trace-Id": trace_id}
+    if downgraded_to:
+        common_headers["X-Gateway-Downgraded"] = downgraded_to
 
     # ---- 非流式 ----
     if not stream:
         try:
             data, channel = await forwarder.forward_non_stream(
-                client, channels, model, body, settings, fernet, breaker=app.state.breaker, metrics=metrics
+                client, channels, routed_model, body, settings, fernet,
+                breaker=app.state.breaker, metrics=metrics,
             )
         except UpstreamError as exc:
             duration_s = perf_counter() - started_at
@@ -282,7 +294,7 @@ async def chat_completions(
                 return JSONResponse(exc.body, status_code=exc.status_code)
             return openai_error(exc.status_code, exc.message, err_type="upstream_error")
 
-        upstream_model = routing.upstream_model_for(channel, model)
+        upstream_model = routing.upstream_model_for(channel, routed_model)
         # 响应里的 model 回写为对外模型名:客户端(与缓存)不应看到上游真实模型名
         if isinstance(data, dict) and isinstance(data.get("model"), str):
             data["model"] = model
@@ -292,11 +304,12 @@ async def chat_completions(
         if choices:
             content = (choices[0].get("message") or {}).get("content") or ""
         pt, ct, tt, usage_source = usage_svc.finalize_usage(pt, ct, tt, body, content)
-        cost = usage_svc.compute_cost(channel, model, pt, ct)
+        cost = usage_svc.compute_cost(channel, routed_model, pt, ct)
         duration_s = perf_counter() - started_at
         meter_common(
             channel_id=channel.id,
             upstream_model=upstream_model,
+            downgraded_to=downgraded_to,
             status="ok",
             status_code=200,
             prompt_tokens=pt,
@@ -324,7 +337,8 @@ async def chat_completions(
     # ---- 流式 ----
     try:
         resp, channel, client_wants_usage = await forwarder.open_stream(
-            client, channels, model, body, settings, fernet, breaker=app.state.breaker, metrics=metrics
+            client, channels, routed_model, body, settings, fernet,
+            breaker=app.state.breaker, metrics=metrics,
         )
     except UpstreamError as exc:
         duration_s = perf_counter() - started_at
@@ -345,7 +359,7 @@ async def chat_completions(
             return JSONResponse(exc.body, status_code=exc.status_code)
         return openai_error(exc.status_code, exc.message, err_type="upstream_error")
 
-    upstream_model = routing.upstream_model_for(channel, model)
+    upstream_model = routing.upstream_model_for(channel, routed_model)
     stats = forwarder.StreamStats()
 
     def meter_stream(status: str) -> None:
@@ -353,11 +367,12 @@ async def chat_completions(
         pt, ct, tt, usage_source = usage_svc.finalize_usage(
             pt, ct, tt, body, "x" * stats.completion_chars
         )
-        cost = usage_svc.compute_cost(channel, model, pt, ct)
+        cost = usage_svc.compute_cost(channel, routed_model, pt, ct)
         duration_s = perf_counter() - started_at
         meter_common(
             channel_id=channel.id,
             upstream_model=upstream_model,
+            downgraded_to=downgraded_to,
             status=status,
             status_code=200,
             prompt_tokens=pt,

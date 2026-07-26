@@ -1,4 +1,5 @@
 import type {
+  AlertItem,
   BreakerState,
   CacheStats,
   Channel,
@@ -8,6 +9,7 @@ import type {
   ModelStat,
   Overview,
   RequestLogItem,
+  SubscriptionUsage,
   VirtualKey,
 } from './types'
 
@@ -91,6 +93,14 @@ export const api = {
   resetBreaker: (channelId: number) =>
     request<void>(`/admin/breakers/${channelId}/reset`, { method: 'POST' }),
   logs: (limit = 100) => request<RequestLogItem[]>(`/admin/logs?limit=${limit}`),
+
+  alerts: (includeAcked = false) =>
+    request<AlertItem[]>(`/admin/alerts?include_acked=${includeAcked}`),
+  ackAlert: (id: number) => request<AlertItem>(`/admin/alerts/${id}/ack`, { method: 'POST' }),
+  ackAllAlerts: () => request<{ acknowledged: number }>('/admin/alerts/ack-all', { method: 'POST' }),
+  runSentinel: () => request<{ ok: boolean }>('/admin/sentinel/run', { method: 'POST' }),
+  subscriptionUsage: (days = 7) =>
+    request<SubscriptionUsage>(`/admin/subscription-usage?days=${days}`),
 }
 
 export function liveTailUrl(): string {

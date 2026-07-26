@@ -61,6 +61,32 @@ class Settings(BaseSettings):
     # Redis(可选):配置后限流用 Redis 实现,支持多 worker;为空用进程内实现(exe 单机模式)
     redis_url: str = ""
 
+    # ---- P3.5 / P4 ----
+
+    # 哨兵:预算阈值/熔断/异常/日报的巡检间隔;0 = 关闭哨兵
+    sentinel_interval_seconds: int = 60
+    # 告警 webhook(可选):每条新告警 POST JSON 到该 URL(Telegram/企微/钉钉自备桥接)
+    alert_webhook_url: str = ""
+    # 用量异常检测:近 1 小时成本 > max(下限, 因子 x 前 24h 小时均值) 即告警
+    anomaly_min_usd: float = 0.5
+    anomaly_factor: float = 3.0
+    # 错误率告警:近 5 分钟窗口
+    error_rate_alert_threshold: float = 0.5
+    error_rate_alert_min_requests: int = 10
+
+    # 难度感知路由:简单请求自动降级到便宜模型
+    downgrade_enabled: bool = False
+    # 对外模型名 -> 降级目标对外模型名(JSON,如 {"gpt-4o": "gpt-4o-mini"})
+    downgrade_map: dict[str, str] = {}
+    # "简单请求"判定:文本总长 < 阈值、无 tools/图片/代码块、轮数 <= 上限
+    downgrade_max_chars: int = 600
+    downgrade_max_messages: int = 4
+
+    # 订阅用量面板(cockpit):解析本机 Claude Code 的 ~/.claude 记录(只读本地文件)
+    subscription_panel_enabled: bool = True
+    # 订阅 token 折算 API 牌价(美元/1M):按模型名前缀匹配,可覆盖内置默认表
+    subscription_prices: dict[str, dict[str, float]] = {}
+
 
 @lru_cache
 def get_settings() -> Settings:

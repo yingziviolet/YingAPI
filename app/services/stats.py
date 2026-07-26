@@ -20,8 +20,9 @@ async def overview(session: AsyncSession, days: int = 7) -> dict:
         func.coalesce(func.sum(RequestLog.cost_usd), 0.0),
         func.coalesce(func.sum(case((RequestLog.cache_hit == True, 1), else_=0)), 0),  # noqa: E712
         func.coalesce(func.sum(case((RequestLog.status == "error", 1), else_=0)), 0),
+        func.coalesce(func.sum(case((RequestLog.downgraded_to != None, 1), else_=0)), 0),  # noqa: E711
     ).where(RequestLog.created_at >= since)
-    total, pt, ct, cost, cache_hits, errors = (await session.execute(base)).one()
+    total, pt, ct, cost, cache_hits, errors, downgraded = (await session.execute(base)).one()
     return {
         "window_days": days,
         "requests": total,
@@ -32,6 +33,7 @@ async def overview(session: AsyncSession, days: int = 7) -> dict:
         "cache_hit_rate": round(cache_hits / total, 4) if total else 0.0,
         "errors": int(errors),
         "error_rate": round(errors / total, 4) if total else 0.0,
+        "downgraded": int(downgraded),
     }
 
 
