@@ -6,14 +6,18 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
+from pathlib import Path
+
 from app.api import admin as admin_api
 from app.api import anthropic as anthropic_api
 from app.api import v1 as v1_api
+from app.api import ws as ws_api
 from app.config import Settings, get_settings
 from app.db import build_engine, build_sessionmaker, create_all
 from app.metrics import Metrics
 from app.security import load_fernet
 from app.services.breaker import CircuitBreaker
+from app.services.livetail import LiveTailHub
 from app.services.ratelimit import build_rate_limiter
 from app.services.semantic_cache import SemanticCache
 from app.services.usage import Meter
@@ -36,7 +40,8 @@ def init_state(app: FastAPI, settings: Settings) -> None:
             max_keepalive_connections=settings.upstream_max_keepalive,
         )
     )
-    app.state.meter = Meter(app.state.sessionmaker)
+    app.state.livetail = LiveTailHub()
+    app.state.meter = Meter(app.state.sessionmaker, on_record=app.state.livetail.publish)
     app.state.breaker = CircuitBreaker(settings)
     app.state.rate_limiter = build_rate_limiter(settings)
     app.state.metrics = Metrics()
@@ -79,6 +84,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(v1_api.router)
     app.include_router(anthropic_api.router)
     app.include_router(admin_api.router)
+    app.include_router(ws_api.router)
+
+    # React 控制台构建产物(存在才挂载:后端可独立运行)
+    console_dist = Path(__file__).resolve().parent.parent / "console" / "dist"
+    if console_dist.exists():
+        from fastapi.responses import RedirectResponse
+        from fastapi.staticfiles import StaticFiles
+
+        app.mount("/console", StaticFiles(directory=str(console_dist), html=True), name="console")
+
+        @app.get("/", include_in_schema=False)
+        async def index():
+            return RedirectResponse("/console/")
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):

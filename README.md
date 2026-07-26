@@ -22,6 +22,12 @@ pip install -e ".[test]"
 ```
 
 ```bash
+cd console && npm install && npm run build && cd ..
+```
+
+(不构建前端也能跑——控制台目录不存在时网关纯 API 运行)
+
+```bash
 GW_ADMIN_TOKEN=$(openssl rand -hex 24) python -m uvicorn app.main:app --port 8080
 ```
 
@@ -117,6 +123,7 @@ python -m pytest tests -q
 - [x] **P1** 透明代理:兼容入口、渠道注册表、流式透传、计量落库、精确缓存、管理 API
 - [x] **P2** 语义缓存(embedding + 余弦相似度,精确未中才查)、渠道熔断器(滑动窗口错误率 → OPEN → 半开探测 → 恢复,控制台可观测/手动复位)、每 key 滑动窗口限流(Redis 可选,进程内兜底)、Prometheus `/metrics`
 - [ ] **P2.5** Anthropic Messages API 入口(`/v1/messages` + 协议翻译),Claude Code 等客户端配自有 key 走网关
-- [ ] **P3** React 控制台:渠道面板、额度大盘、WebSocket live-tail、告警中心、订阅用量面板(本地遥测,cockpit 式)
+- [x] **P3** React 控制台(Vite+React+TS+Tailwind+ECharts):额度大盘(总览/每日曲线/按渠道/按模型/预算进度+耗尽预测)、渠道面板(健康灯/启停/优先级/连通测试/熔断状态+复位)、虚拟 key 管理(发放/预算/限流)、实时请求流(WebSocket live-tail)、智能层成绩单(缓存命中/省钱估算/熔断记录);构建产物由 FastAPI 托管于 `/console/`
+- [ ] **P3.5** 告警中心 + 订阅用量面板(本地遥测,cockpit 式)
 - [ ] **P4** 难度感知路由 + 质量回评、用量异常哨兵、日成本报告、语义缓存 pgvector 索引化
 - 交付形态:服务器 Docker Compose;单机 Windows exe 安装包(PyInstaller + Inno Setup,SQLite,零外部依赖)

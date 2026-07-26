@@ -95,13 +95,22 @@ def compute_cost(
 
 
 class Meter:
-    """异步计量器:record() 立即返回,写库在后台任务完成;shutdown 时排干。"""
+    """异步计量器:record() 立即返回,写库在后台任务完成;shutdown 时排干。
 
-    def __init__(self, sessionmaker: async_sessionmaker[AsyncSession]):
+    on_record(可选):每笔计量的旁路回调(live-tail 推送),异常不影响落库。
+    """
+
+    def __init__(self, sessionmaker: async_sessionmaker[AsyncSession], on_record=None):
         self._sessionmaker = sessionmaker
         self._tasks: set[asyncio.Task] = set()
+        self._on_record = on_record
 
     def record(self, **fields: Any) -> None:
+        if self._on_record is not None:
+            try:
+                self._on_record(dict(fields))
+            except Exception:
+                logger.exception("live-tail publish failed")
         task = asyncio.create_task(self._write(fields))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
