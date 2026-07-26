@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { ChevronDown, ChevronUp, Plus, Trash2, Wallet, Zap } from 'lucide-react'
 import { api } from '../api'
 import type { BreakerState, Channel, ChannelBalance } from '../types'
+import ChannelCard from '../components/ChannelCard'
+import { ViewToggle } from './Keys'
 import { Badge, Button, Card, Empty, IconButton, Input, Led, Table, Td, Tr } from '../components/ui'
 
 const breakerLabel: Record<string, string> = { closed: '正常', open: '熔断', half_open: '半开探测' }
@@ -10,6 +12,9 @@ export default function Channels() {
   const [channels, setChannels] = useState<Channel[]>([])
   const [breakers, setBreakers] = useState<Record<number, BreakerState>>({})
   const [balances, setBalances] = useState<Record<number, ChannelBalance>>({})
+  const [view, setView] = useState<'grid' | 'list'>(
+    () => (localStorage.getItem('gw_channels_view') as 'grid' | 'list') || 'grid',
+  )
   const [showCreate, setShowCreate] = useState(false)
   const [testResult, setTestResult] = useState<Record<number, string>>({})
   const [error, setError] = useState('')
@@ -81,7 +86,14 @@ export default function Channels() {
         <p className="text-[12.5px] text-ink-mid">
           静态优先级路由:数字越小越优先,同模型多渠道自动 failover;熔断渠道会被跳过
         </p>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          <ViewToggle
+            view={view}
+            onChange={(v) => {
+              setView(v)
+              localStorage.setItem('gw_channels_view', v)
+            }}
+          />
           <Button onClick={loadBalances}><Wallet size={14} />刷新余额</Button>
           <Button kind="primary" onClick={() => setShowCreate((v) => !v)}>
             <Plus size={14} />添加渠道
@@ -104,14 +116,34 @@ export default function Channels() {
         </div>
       )}
 
-      <Card pad={false}>
-        {channels.length === 0 ? (
+      {channels.length === 0 ? (
+        <Card>
           <Empty
             text="还没有配置渠道"
             hint="添加一个你自己合法持有的 API key,网关就能开始转发"
             action={<Button kind="primary" onClick={() => setShowCreate(true)}><Plus size={14} />添加渠道</Button>}
           />
-        ) : (
+        </Card>
+      ) : view === 'grid' ? (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {channels.map((ch) => (
+            <ChannelCard
+              key={ch.id}
+              channel={ch}
+              breaker={breakers[ch.id]}
+              balance={balances[ch.id]}
+              testResult={testResult[ch.id]}
+              onToggle={() => toggle(ch)}
+              onPriority={(d) => movePriority(ch, d)}
+              onTest={() => test(ch)}
+              onRefreshBalance={loadBalances}
+              onResetBreaker={() => api.resetBreaker(ch.id).then(load)}
+              onDelete={() => remove(ch)}
+            />
+          ))}
+        </div>
+      ) : (
+        <Card pad={false}>
           <Table head={['', '渠道', '模型', '余额', '优先级', '熔断状态', '操作']}>
             {channels.map((ch) => {
               const br = breakers[ch.id]
@@ -173,8 +205,8 @@ export default function Channels() {
               )
             })}
           </Table>
-        )}
-      </Card>
+        </Card>
+      )}
     </div>
   )
 }

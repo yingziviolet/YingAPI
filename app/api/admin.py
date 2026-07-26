@@ -182,6 +182,7 @@ async def create_key(payload: VirtualKeyCreate, session: AsyncSession = Depends(
         key_masked=mask_key(raw),
         monthly_budget_usd=payload.monthly_budget_usd,
         rpm_limit=payload.rpm_limit,
+        note=payload.note,
     )
     session.add(vkey)
     await session.commit()
@@ -193,8 +194,36 @@ async def create_key(payload: VirtualKeyCreate, session: AsyncSession = Depends(
         enabled=vkey.enabled,
         monthly_budget_usd=vkey.monthly_budget_usd,
         rpm_limit=vkey.rpm_limit,
+        note=vkey.note,
+        rotated_count=vkey.rotated_count,
         created_at=vkey.created_at,
         key=raw,  # 原文仅此一次
+    )
+
+
+@router.post("/keys/{key_id}/rotate", response_model=VirtualKeyCreated)
+async def rotate_key(key_id: int, session: AsyncSession = Depends(get_session)):
+    """轮换 key:旧 key 立即失效,新 key 原文仅此一次返回。计量历史与预算保留。"""
+    vkey = await session.get(VirtualKey, key_id)
+    if vkey is None:
+        raise HTTPException(status_code=404, detail="key not found")
+    raw = generate_virtual_key()
+    vkey.key_hash = hash_virtual_key(raw)
+    vkey.key_masked = mask_key(raw)
+    vkey.rotated_count += 1
+    await session.commit()
+    await session.refresh(vkey)
+    return VirtualKeyCreated(
+        id=vkey.id,
+        name=vkey.name,
+        key_masked=vkey.key_masked,
+        enabled=vkey.enabled,
+        monthly_budget_usd=vkey.monthly_budget_usd,
+        rpm_limit=vkey.rpm_limit,
+        note=vkey.note,
+        rotated_count=vkey.rotated_count,
+        created_at=vkey.created_at,
+        key=raw,
     )
 
 
@@ -212,8 +241,8 @@ async def update_key(
     if vkey is None:
         raise HTTPException(status_code=404, detail="key not found")
     for field, value in payload.model_dump(exclude_unset=True).items():
-        # 可空列(预算/限流)允许 null=清空;其余显式 null 拒绝
-        if value is None and field not in {"monthly_budget_usd", "rpm_limit"}:
+        # 可空列(预算/限流/备注)允许 null=清空;其余显式 null 拒绝
+        if value is None and field not in {"monthly_budget_usd", "rpm_limit", "note"}:
             raise HTTPException(status_code=422, detail=f"field '{field}' cannot be null")
         setattr(vkey, field, value)
     await session.commit()

@@ -52,12 +52,14 @@ class VirtualKeyCreate(BaseModel):
     monthly_budget_usd: float | None = Field(default=None, ge=0)
     # 0 = 该 key 不限流(覆盖全局 GW_DEFAULT_RPM_LIMIT);None = 回退全局默认
     rpm_limit: int | None = Field(default=None, ge=0)
+    note: str | None = Field(default=None, max_length=200)
 
 
 class VirtualKeyUpdate(BaseModel):
     enabled: bool | None = None
     monthly_budget_usd: float | None = Field(default=None, ge=0)
     rpm_limit: int | None = Field(default=None, ge=0)
+    note: str | None = Field(default=None, max_length=200)
 
 
 class VirtualKeyOut(BaseModel):
@@ -69,6 +71,8 @@ class VirtualKeyOut(BaseModel):
     enabled: bool
     monthly_budget_usd: float | None
     rpm_limit: int | None
+    note: str | None
+    rotated_count: int
     created_at: datetime
 
 

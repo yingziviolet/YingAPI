@@ -82,6 +82,8 @@ export const api = {
     }),
   updateKey: (id: number, body: object) =>
     request<VirtualKey>(`/admin/keys/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  rotateKey: (id: number) =>
+    request<VirtualKey & { key: string }>(`/admin/keys/${id}/rotate`, { method: 'POST' }),
   deleteKey: (id: number) => request<void>(`/admin/keys/${id}`, { method: 'DELETE' }),
   keySpend: (id: number) => request<KeySpend>(`/admin/keys/${id}/spend`),
 

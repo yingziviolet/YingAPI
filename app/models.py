@@ -54,6 +54,10 @@ class VirtualKey(Base):
     monthly_budget_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     # 每分钟请求数上限,空则用全局 GW_DEFAULT_RPM_LIMIT
     rpm_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 备注:这把 key 发给了谁/用在哪
+    note: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # 轮换次数(每次 rotate +1,卡片上展示)
+    rotated_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

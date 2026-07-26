@@ -20,6 +20,8 @@ export interface VirtualKey {
   enabled: boolean
   monthly_budget_usd: number | null
   rpm_limit: number | null
+  note: string | null
+  rotated_count: number
   created_at: string
 }
 
