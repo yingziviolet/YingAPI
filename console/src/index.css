@@ -1,51 +1,187 @@
 @import "tailwindcss";
+@import "@fontsource-variable/sora";
+@import "@fontsource/noto-sans-sc/400.css";
+@import "@fontsource/noto-sans-sc/500.css";
+@import "@fontsource/noto-sans-sc/700.css";
+@import "@fontsource-variable/jetbrains-mono";
 
-/* 深色为基准色板;.light 通过重定义 Tailwind v4 的颜色变量整体翻转主题。
-   页面里的 slate-950/900/800 是背景层,slate-300~100 是文字层,
-   浅色模式下两端互换,组件代码零改动。 */
-:root.light {
-  --color-slate-950: #f6f7f9; /* 页面背景 */
-  --color-slate-900: #ffffff; /* 面板 */
-  --color-slate-800: #e8ecf1; /* 边框/输入框/悬停 */
-  --color-slate-700: #d3dae3;
-  --color-slate-600: #8b98a9; /* 最浅说明文字 */
-  --color-slate-500: #64748b;
-  --color-slate-400: #475569;
-  --color-slate-300: #334155;
-  --color-slate-200: #1e293b; /* 正文 */
-  --color-slate-100: #0f172a; /* 标题 */
+/* ============================================================
+   LLM 网关控制台
+   视觉方向:白色打底的现代桌面工具。侧栏浅色带轻微渐变,
+   主区留白充足;蓝→青渐变作为品牌色,只用在关键处(激活态、
+   主按钮、图表)。深色为可选夜间模式。
+   ============================================================ */
 
-  /* 强调色在白底上加深一档,保证对比度 */
-  --color-cyan-400: #0e7490;
-  --color-cyan-300: #155e75;
-  --color-cyan-200: #164e63;
-  --color-emerald-400: #047857;
-  --color-rose-400: #be123c;
-  --color-amber-400: #b45309;
+@theme {
+  /* —— 面板层次(浅色主调) —— */
+  --color-surface: #f4f6fa;      /* 窗口/主区背景 */
+  --color-surface-rail: #eef1f7; /* 侧栏 */
+  --color-surface-card: #ffffff; /* 卡片 */
+  --color-surface-sunken: #f7f9fc;/* 输入框/表头 */
+  --color-surface-hover: #e9edf5;
+  --color-line: #e2e8f2;         /* 边框 */
+  --color-line-soft: #eef1f7;
+
+  /* —— 文字层次 —— */
+  --color-ink-hi: #0f172a;
+  --color-ink: #334155;
+  --color-ink-mid: #64748b;
+  --color-ink-low: #94a3b8;
+
+  /* —— 品牌:蓝 → 青 —— */
+  --color-brand: #2563eb;
+  --color-brand-2: #06b6d4;
+  --color-brand-soft: #eff6ff;
+  --color-brand-ring: #bfdbfe;
+
+  /* —— 语义 —— */
+  --color-good: #059669;
+  --color-warn: #d97706;
+  --color-alert: #dc2626;
+  --color-flux: #7c3aed;
+
+  --font-display: "Sora Variable", "Sora", "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
 }
 
-:root.light {
-  color-scheme: light;
+/* —— 夜间模式 —— */
+:root.dark {
+  --color-surface: #0f1218;
+  --color-surface-rail: #12161e;
+  --color-surface-card: #171c26;
+  --color-surface-sunken: #1b2130;
+  --color-surface-hover: #212936;
+  --color-line: #262f3f;
+  --color-line-soft: #1e2532;
+
+  --color-ink-hi: #f1f5f9;
+  --color-ink: #cbd5e1;
+  --color-ink-mid: #94a3b8;
+  --color-ink-low: #64748b;
+
+  --color-brand: #60a5fa;
+  --color-brand-2: #22d3ee;
+  --color-brand-soft: #1e293b;
+  --color-brand-ring: #1e40af;
+
+  --color-good: #34d399;
+  --color-warn: #fbbf24;
+  --color-alert: #f87171;
+  --color-flux: #a78bfa;
 }
-:root:not(.light) {
-  color-scheme: dark;
-}
+
+:root.dark { color-scheme: dark; }
+:root:not(.dark) { color-scheme: light; }
+
+html, body, #root { height: 100%; }
 
 body {
-  background-color: var(--color-slate-950);
-  color: var(--color-slate-200);
-  font-family: "Inter", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif;
+  margin: 0;
+  background-color: var(--color-surface);
+  color: var(--color-ink);
+  font-family: var(--font-display);
   -webkit-font-smoothing: antialiased;
+  overflow: hidden; /* 应用窗口:各区域内部滚动 */
 }
 
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+/* —— 侧栏:极淡的品牌色晕染,像 Cockpit 那种通透感 —— */
+.rail-wash {
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--color-brand) 5%, transparent) 0%,
+      transparent 32%),
+    var(--color-surface-rail);
 }
+
+/* —— 主区顶部同样一层极淡晕染,避免大片死白 —— */
+.stage-wash {
+  background:
+    radial-gradient(1200px 420px at 18% -8%,
+      color-mix(in srgb, var(--color-brand-2) 8%, transparent), transparent 70%),
+    var(--color-surface);
+}
+
+/* —— 卡片 —— */
+.card {
+  background-color: var(--color-surface-card);
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 6px 16px -8px rgb(15 23 42 / 0.06);
+}
+:root.dark .card { box-shadow: none; }
+
+/* —— 品牌渐变(主按钮/激活图标) —— */
+.grad-brand {
+  background-image: linear-gradient(135deg, var(--color-brand), var(--color-brand-2));
+}
+.grad-text {
+  background-image: linear-gradient(135deg, var(--color-brand), var(--color-brand-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* —— 侧栏激活项:左侧竖条 + 浅底 —— */
+.nav-active {
+  background-color: var(--color-surface-card);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
+}
+.nav-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  translate: 0 -50%;
+  width: 3px;
+  height: 18px;
+  border-radius: 0 3px 3px 0;
+  background-image: linear-gradient(180deg, var(--color-brand), var(--color-brand-2));
+}
+
+/* —— 状态灯 —— */
+.led {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex: none;
+  position: relative;
+}
+.led::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.2;
+  filter: blur(2px);
+}
+.led-pulse::after { animation: led-breathe 2.4s ease-in-out infinite; }
+@keyframes led-breathe {
+  0%, 100% { opacity: 0.14; transform: scale(1); }
+  50%      { opacity: 0.4;  transform: scale(1.4); }
+}
+
+/* —— 标题栏拖拽(pywebview frameless) —— */
+.titlebar-drag { -webkit-app-region: drag; app-region: drag; }
+.titlebar-nodrag { -webkit-app-region: no-drag; app-region: no-drag; }
+
+/* —— 载入编排 —— */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+.rise { animation: rise 0.4s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* —— 滚动条 —— */
+::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb {
-  background-color: var(--color-slate-700);
-  border-radius: 4px;
+  background-color: var(--color-line);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
 }
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+::-webkit-scrollbar-thumb:hover { background-color: var(--color-ink-low); }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* 数字等宽定宽,读数刷新不抖 */
+.tnum { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }

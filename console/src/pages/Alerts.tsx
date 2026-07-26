@@ -1,13 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Check, CheckCheck, RefreshCw } from 'lucide-react'
 import { api } from '../api'
 import type { AlertItem } from '../types'
-import { Badge, Button, Card, Empty, Td, Th } from '../components/ui'
-
-const severityBadge: Record<string, string> = {
-  info: 'neutral',
-  warning: 'cancelled',
-  critical: 'error',
-}
+import { Badge, Button, Card, Empty, Table, Td, Tr } from '../components/ui'
 
 const kindLabel: Record<string, string> = {
   budget: '预算',
@@ -43,61 +38,63 @@ export default function Alerts() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-slate-500">
-          哨兵巡检:预算 80%/100%、渠道熔断、key 异常消耗、错误率突增、每日用量报告
-          {'  '}·{'  '}可配 GW_ALERT_WEBHOOK_URL 推送到 Telegram/企微桥接
-        </div>
+    <div className="space-y-5">
+      <div className="flex items-center justify-between gap-4">
+        <p className="text-[12.5px] leading-relaxed text-ink-mid">
+          哨兵巡检:预算 80%/100%、渠道熔断、key 消耗异常突增(定位泄漏)、错误率突增、每日用量报告
+          <br />
+          <span className="text-ink-low">配置 GW_ALERT_WEBHOOK_URL 可推送到 Telegram / 企微桥接</span>
+        </p>
         <div className="flex items-center gap-2">
-          <label className="flex items-center gap-1 text-xs text-slate-500">
+          <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-ink-mid">
             <input
               type="checkbox"
               checked={includeAcked}
               onChange={(e) => setIncludeAcked(e.target.checked)}
+              className="accent-brand"
             />
             含已确认
           </label>
           <Button onClick={runNow} disabled={running}>
-            {running ? '巡检中…' : '立即巡检'}
+            <RefreshCw size={14} className={running ? 'animate-spin' : ''} />
+            {running ? '巡检中' : '立即巡检'}
           </Button>
-          <Button onClick={() => api.ackAllAlerts().then(load)}>全部确认</Button>
+          <Button onClick={() => api.ackAllAlerts().then(load)}>
+            <CheckCheck size={14} />全部确认
+          </Button>
         </div>
       </div>
 
-      <Card>
+      <Card pad={false}>
         {alerts.length === 0 ? (
-          <Empty text="没有未确认的告警——一切正常" />
+          <Empty text="没有未确认的告警" hint="哨兵每分钟巡检一次,有异常会立刻出现在这里" />
         ) : (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-slate-800">
-                <Th>时间</Th><Th>类型</Th><Th>级别</Th><Th>内容</Th><Th></Th>
-              </tr>
-            </thead>
-            <tbody>
-              {alerts.map((a) => (
-                <tr key={a.id} className={`border-b border-slate-800/50 ${a.acknowledged ? 'opacity-50' : ''}`}>
-                  <Td className="text-xs text-slate-500">
-                    {new Date(a.created_at).toLocaleString()}
-                  </Td>
-                  <Td><Badge kind="neutral">{kindLabel[a.kind] ?? a.kind}</Badge></Td>
-                  <Td><Badge kind={severityBadge[a.severity] ?? 'neutral'}>{a.severity}</Badge></Td>
-                  <Td>
-                    <div className="text-slate-200">{a.title}</div>
-                    <div className="text-xs text-slate-500">{a.detail}</div>
-                  </Td>
-                  <Td>
-                    {!a.acknowledged && (
-                      <Button kind="ghost" onClick={() => api.ackAlert(a.id).then(load)}>
-                        确认
-                      </Button>
-                    )}
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <Table head={['时间', '类型', '级别', '内容', '']}>
+            {alerts.map((a) => (
+              <Tr key={a.id}>
+                <Td mono className="text-[11.5px] text-ink-low">
+                  {new Date(a.created_at).toLocaleString()}
+                </Td>
+                <Td>
+                  <span className="rounded-md bg-surface-sunken px-2 py-0.5 text-[11.5px] text-ink-mid">
+                    {kindLabel[a.kind] ?? a.kind}
+                  </span>
+                </Td>
+                <Td><Badge kind={a.severity}>{a.severity}</Badge></Td>
+                <Td className={a.acknowledged ? 'opacity-50' : ''}>
+                  <div className="font-medium text-ink-hi">{a.title}</div>
+                  <div className="text-[11.5px] text-ink-mid">{a.detail}</div>
+                </Td>
+                <Td>
+                  {!a.acknowledged && (
+                    <Button kind="ghost" onClick={() => api.ackAlert(a.id).then(load)}>
+                      <Check size={13} />确认
+                    </Button>
+                  )}
+                </Td>
+              </Tr>
+            ))}
+          </Table>
         )}
       </Card>
     </div>

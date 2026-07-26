@@ -3,6 +3,7 @@ import type {
   BreakerState,
   CacheStats,
   Channel,
+  ChannelBalance,
   ChannelStat,
   DailyStat,
   KeySpend,
@@ -101,6 +102,9 @@ export const api = {
   runSentinel: () => request<{ ok: boolean }>('/admin/sentinel/run', { method: 'POST' }),
   subscriptionUsage: (days = 7) =>
     request<SubscriptionUsage>(`/admin/subscription-usage?days=${days}`),
+
+  balances: () => request<ChannelBalance[]>('/admin/balances'),
+  channelBalance: (id: number) => request<ChannelBalance>(`/admin/channels/${id}/balance`),
 }
 
 export function liveTailUrl(): string {

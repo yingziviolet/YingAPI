@@ -6,6 +6,7 @@ export interface Channel {
   models: string[]
   model_map: Record<string, string>
   prices: Record<string, { input?: number; output?: number }>
+  balance_url: string | null
   priority: number
   enabled: boolean
   created_at: string
@@ -32,6 +33,7 @@ export interface Overview {
   cache_hit_rate: number
   errors: number
   error_rate: number
+  downgraded?: number
 }
 
 export interface ChannelStat {
@@ -79,6 +81,20 @@ export interface KeySpend {
   name: string
   month_to_date_usd: number
   monthly_budget_usd: number | null
+}
+
+export interface ChannelBalance {
+  channel_id: number
+  channel_name: string
+  ok: boolean
+  source?: string
+  error?: string
+  balance?: {
+    total?: number
+    used?: number
+    remaining?: number
+    currency?: string
+  }
 }
 
 export interface AlertItem {
@@ -140,6 +156,7 @@ export interface RequestLogItem {
   completion_tokens: number | null
   total_tokens: number | null
   usage_source?: string
+  downgraded_to?: string | null
   cost_usd: number | null
   latency_ms: number | null
   first_token_ms: number | null
