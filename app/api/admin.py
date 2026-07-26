@@ -1,0 +1,276 @@
+"""控制面管理 API:渠道 CRUD、虚拟 key 管理、用量统计聚合、请求日志。
+
+鉴权:Bearer <GW_ADMIN_TOKEN>。后续 React 控制台直接对接这组接口。
+"""
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+import httpx
+
+from app.deps import get_session, require_admin
+from app.models import Channel, RequestLog, VirtualKey
+from app.schemas.admin import (
+    ChannelCreate,
+    ChannelOut,
+    ChannelUpdate,
+    RequestLogOut,
+    VirtualKeyCreate,
+    VirtualKeyCreated,
+    VirtualKeyOut,
+    VirtualKeyUpdate,
+)
+from app.security import encrypt_api_key, generate_virtual_key, hash_virtual_key, mask_key
+from app.services import stats as stats_svc
+from app.services.forwarder import _chat_url, _headers, _timeout
+
+router = APIRouter(prefix="/admin", tags=["control-plane"], dependencies=[Depends(require_admin)])
+
+
+def _validate_prices(models: list[str], prices: dict) -> None:
+    """价格表键必须是对外模型名(models 列表里的名字),配错键会让成本静默记 NULL、预算失效。"""
+    unknown = set(prices or {}) - set(models or [])
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"prices contain models not in 'models' list: {sorted(unknown)}; "
+                "price keys must use public model names (not upstream names from model_map)"
+            ),
+        )
+
+
+# ---------- 渠道 CRUD ----------
+
+
+@router.post("/channels", response_model=ChannelOut, status_code=201)
+async def create_channel(
+    payload: ChannelCreate, request: Request, session: AsyncSession = Depends(get_session)
+):
+    _validate_prices(payload.models, payload.prices)
+    exists = (
+        await session.execute(select(Channel).where(Channel.name == payload.name))
+    ).scalar_one_or_none()
+    if exists:
+        raise HTTPException(status_code=409, detail=f"channel '{payload.name}' already exists")
+    channel = Channel(
+        name=payload.name,
+        provider=payload.provider,
+        base_url=payload.base_url,
+        api_key_encrypted=encrypt_api_key(request.app.state.fernet, payload.api_key),
+        models=payload.models,
+        model_map=payload.model_map,
+        prices=payload.prices,
+        priority=payload.priority,
+        enabled=payload.enabled,
+    )
+    session.add(channel)
+    await session.commit()
+    await session.refresh(channel)
+    return channel
+
+
+@router.get("/channels", response_model=list[ChannelOut])
+async def list_channels(session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(Channel).order_by(Channel.priority, Channel.id))
+    return result.scalars().all()
+
+
+@router.get("/channels/{channel_id}", response_model=ChannelOut)
+async def get_channel(channel_id: int, session: AsyncSession = Depends(get_session)):
+    channel = await session.get(Channel, channel_id)
+    if channel is None:
+        raise HTTPException(status_code=404, detail="channel not found")
+    return channel
+
+
+@router.patch("/channels/{channel_id}", response_model=ChannelOut)
+async def update_channel(
+    channel_id: int,
+    payload: ChannelUpdate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    channel = await session.get(Channel, channel_id)
+    if channel is None:
+        raise HTTPException(status_code=404, detail="channel not found")
+    data = payload.model_dump(exclude_unset=True)
+    # 校验合并后的最终值:只改 models 或只改 prices 也可能造成键失配
+    final_models = data.get("models", channel.models)
+    final_prices = data.get("prices", channel.prices)
+    _validate_prices(final_models, final_prices)
+    api_key = data.pop("api_key", None)
+    if api_key:
+        channel.api_key_encrypted = encrypt_api_key(request.app.state.fernet, api_key)
+    for field, value in data.items():
+        setattr(channel, field, value)
+    await session.commit()
+    await session.refresh(channel)
+    return channel
+
+
+@router.delete("/channels/{channel_id}", status_code=204)
+async def delete_channel(channel_id: int, session: AsyncSession = Depends(get_session)):
+    channel = await session.get(Channel, channel_id)
+    if channel is None:
+        raise HTTPException(status_code=404, detail="channel not found")
+    await session.delete(channel)
+    await session.commit()
+
+
+@router.post("/channels/{channel_id}/test")
+async def test_channel(
+    channel_id: int, request: Request, session: AsyncSession = Depends(get_session)
+):
+    """连通性测试:向该渠道发一条最小请求,返回状态与延迟(D7 排障用)。"""
+    channel = await session.get(Channel, channel_id)
+    if channel is None:
+        raise HTTPException(status_code=404, detail="channel not found")
+    model = (channel.models or ["gpt-4o-mini"])[0]
+    upstream_model = (channel.model_map or {}).get(model, model)
+    body = {
+        "model": upstream_model,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 1,
+    }
+    client: httpx.AsyncClient = request.app.state.upstream_client
+    settings = request.app.state.settings
+    from time import perf_counter
+
+    start = perf_counter()
+    try:
+        resp = await client.post(
+            _chat_url(channel),
+            json=body,
+            headers=_headers(channel, request.app.state.fernet),
+            timeout=_timeout(settings),
+        )
+        return {
+            "ok": resp.status_code < 400,
+            "status_code": resp.status_code,
+            "latency_ms": int((perf_counter() - start) * 1000),
+        }
+    except httpx.HTTPError as exc:
+        return {
+            "ok": False,
+            "status_code": None,
+            "latency_ms": int((perf_counter() - start) * 1000),
+            "error": repr(exc),
+        }
+
+
+# ---------- 虚拟 key ----------
+
+
+@router.post("/keys", response_model=VirtualKeyCreated, status_code=201)
+async def create_key(payload: VirtualKeyCreate, session: AsyncSession = Depends(get_session)):
+    exists = (
+        await session.execute(select(VirtualKey).where(VirtualKey.name == payload.name))
+    ).scalar_one_or_none()
+    if exists:
+        raise HTTPException(status_code=409, detail=f"key '{payload.name}' already exists")
+    raw = generate_virtual_key()
+    vkey = VirtualKey(
+        name=payload.name,
+        key_hash=hash_virtual_key(raw),
+        key_masked=mask_key(raw),
+        monthly_budget_usd=payload.monthly_budget_usd,
+    )
+    session.add(vkey)
+    await session.commit()
+    await session.refresh(vkey)
+    return VirtualKeyCreated(
+        id=vkey.id,
+        name=vkey.name,
+        key_masked=vkey.key_masked,
+        enabled=vkey.enabled,
+        monthly_budget_usd=vkey.monthly_budget_usd,
+        created_at=vkey.created_at,
+        key=raw,  # 原文仅此一次
+    )
+
+
+@router.get("/keys", response_model=list[VirtualKeyOut])
+async def list_keys(session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(VirtualKey).order_by(VirtualKey.id))
+    return result.scalars().all()
+
+
+@router.patch("/keys/{key_id}", response_model=VirtualKeyOut)
+async def update_key(
+    key_id: int, payload: VirtualKeyUpdate, session: AsyncSession = Depends(get_session)
+):
+    vkey = await session.get(VirtualKey, key_id)
+    if vkey is None:
+        raise HTTPException(status_code=404, detail="key not found")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(vkey, field, value)
+    await session.commit()
+    await session.refresh(vkey)
+    return vkey
+
+
+@router.delete("/keys/{key_id}", status_code=204)
+async def delete_key(key_id: int, session: AsyncSession = Depends(get_session)):
+    vkey = await session.get(VirtualKey, key_id)
+    if vkey is None:
+        raise HTTPException(status_code=404, detail="key not found")
+    await session.delete(vkey)
+    await session.commit()
+
+
+@router.get("/keys/{key_id}/spend")
+async def key_spend(key_id: int, session: AsyncSession = Depends(get_session)):
+    vkey = await session.get(VirtualKey, key_id)
+    if vkey is None:
+        raise HTTPException(status_code=404, detail="key not found")
+    spent = await stats_svc.key_spend_month_to_date(session, key_id)
+    return {
+        "key_id": key_id,
+        "name": vkey.name,
+        "month_to_date_usd": round(spent, 6),
+        "monthly_budget_usd": vkey.monthly_budget_usd,
+    }
+
+
+# ---------- 统计与日志 ----------
+
+
+@router.get("/stats/overview")
+async def stats_overview(
+    days: int = Query(default=7, ge=1, le=90), session: AsyncSession = Depends(get_session)
+):
+    return await stats_svc.overview(session, days)
+
+
+@router.get("/stats/channels")
+async def stats_channels(
+    days: int = Query(default=7, ge=1, le=90), session: AsyncSession = Depends(get_session)
+):
+    return await stats_svc.by_channel(session, days)
+
+
+@router.get("/stats/models")
+async def stats_models(
+    days: int = Query(default=7, ge=1, le=90), session: AsyncSession = Depends(get_session)
+):
+    return await stats_svc.by_model(session, days)
+
+
+@router.get("/stats/daily")
+async def stats_daily(
+    days: int = Query(default=7, ge=1, le=90), session: AsyncSession = Depends(get_session)
+):
+    return await stats_svc.daily_series(session, days)
+
+
+@router.get("/logs", response_model=list[RequestLogOut])
+async def list_logs(
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(RequestLog).order_by(RequestLog.id.desc()).limit(limit).offset(offset)
+    )
+    return result.scalars().all()

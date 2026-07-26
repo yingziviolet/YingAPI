@@ -1,0 +1,41 @@
+services:
+  gateway:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      GW_DATABASE_URL: postgresql+asyncpg://gateway:gateway@db:5432/gateway
+      GW_AUTO_CREATE_TABLES: "false"
+      GW_SECRET_KEY: ${GW_SECRET_KEY:?run 'python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"' and put it in .env}
+      GW_ADMIN_TOKEN: ${GW_ADMIN_TOKEN:?set GW_ADMIN_TOKEN in .env}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    # pgvector 镜像:P2 语义缓存直接可用
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: gateway
+      POSTGRES_PASSWORD: gateway
+      POSTGRES_DB: gateway
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gateway"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    # P2 使用:限流滑动窗口 / 熔断器状态
+    image: redis:7-alpine
+    volumes:
+      - redisdata:/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
