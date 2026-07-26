@@ -19,7 +19,7 @@ class ChannelCreate(BaseModel):
 class ChannelUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=64)
     provider: str | None = None
-    base_url: str | None = None
+    base_url: str | None = Field(default=None, min_length=1, max_length=255)
     api_key: str | None = None  # 传入则轮换密钥
     models: list[str] | None = None
     model_map: dict[str, str] | None = None
@@ -47,13 +47,14 @@ class ChannelOut(BaseModel):
 class VirtualKeyCreate(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     monthly_budget_usd: float | None = Field(default=None, ge=0)
-    rpm_limit: int | None = Field(default=None, ge=1)
+    # 0 = 该 key 不限流(覆盖全局 GW_DEFAULT_RPM_LIMIT);None = 回退全局默认
+    rpm_limit: int | None = Field(default=None, ge=0)
 
 
 class VirtualKeyUpdate(BaseModel):
     enabled: bool | None = None
     monthly_budget_usd: float | None = Field(default=None, ge=0)
-    rpm_limit: int | None = Field(default=None, ge=1)
+    rpm_limit: int | None = Field(default=None, ge=0)
 
 
 class VirtualKeyOut(BaseModel):

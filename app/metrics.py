@@ -49,8 +49,8 @@ class Metrics:
         )
         self.ratelimit_rejections_total = Counter(
             "gateway_ratelimit_rejections_total",
-            "Requests rejected by rate limiting",
-            labelnames=("key_name",),
+            "Requests rejected by rate limiting or budget",
+            labelnames=("key_name", "reason"),  # reason: rpm / budget
             registry=self.registry,
         )
         self.circuit_state = Gauge(
@@ -99,6 +99,8 @@ _STATE_VALUE = {"closed": 0, "half_open": 1, "open": 2}
 
 
 def update_circuit_gauges(metrics: Metrics, snapshot: dict[int, dict], names: dict[int, str]) -> None:
+    # 先清后填:手动复位/删除渠道后不残留旧值(单事件循环内同步执行,单次导出原子)
+    metrics.circuit_state.clear()
     for channel_id, info in snapshot.items():
         name = names.get(channel_id, str(channel_id))
         metrics.circuit_state.labels(channel=name).set(_STATE_VALUE.get(info["state"], 0))

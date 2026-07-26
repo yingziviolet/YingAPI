@@ -21,6 +21,8 @@ class Settings(BaseSettings):
 
     # 控制面管理 API 的 Bearer token
     admin_token: str = "change-me"
+    # /metrics 抓取 token(可选):为空保持开放(仅本机/内网);对外部署应设置
+    metrics_token: str = ""
 
     # 上游转发
     upstream_timeout_connect: float = 10.0

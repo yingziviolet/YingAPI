@@ -146,7 +146,7 @@ async def chat_completions(
     rpm_limit = vkey.rpm_limit if vkey.rpm_limit is not None else settings.default_rpm_limit
     decision = await app.state.rate_limiter.check(vkey.id, rpm_limit)
     if not decision.allowed:
-        metrics.ratelimit_rejections_total.labels(key_name=vkey.name).inc()
+        metrics.ratelimit_rejections_total.labels(key_name=vkey.name, reason="rpm").inc()
         return openai_error(
             429,
             f"rate limit exceeded for key '{vkey.name}' ({decision.limit} requests/min)",
@@ -159,6 +159,7 @@ async def chat_completions(
     if vkey.monthly_budget_usd is not None:
         spent = await stats_svc.key_spend_month_to_date(session, vkey.id)
         if spent >= vkey.monthly_budget_usd:
+            metrics.ratelimit_rejections_total.labels(key_name=vkey.name, reason="budget").inc()
             return openai_error(
                 429,
                 f"monthly budget exhausted for key '{vkey.name}' "
@@ -232,7 +233,8 @@ async def chat_completions(
             if text:
                 request_embedding = await semantic.embed(session, text)
             if request_embedding is not None:
-                found = await semantic.lookup(session, model, request_embedding)
+                params_hash = cache_svc.make_params_hash(body)
+                found = await semantic.lookup(session, model, params_hash, request_embedding)
                 if found is not None:
                     response_json, score = found
                     metrics.cache_events_total.labels(kind="semantic", outcome="hit").inc()
@@ -259,7 +261,7 @@ async def chat_completions(
     if not stream:
         try:
             data, channel = await forwarder.forward_non_stream(
-                client, channels, model, body, settings, fernet, breaker=app.state.breaker
+                client, channels, model, body, settings, fernet, breaker=app.state.breaker, metrics=metrics
             )
         except UpstreamError as exc:
             duration_s = perf_counter() - started_at
@@ -312,7 +314,9 @@ async def chat_completions(
         if cache_key:
             await cache_svc.put_cached(session, cache_key, model, data, settings)
         if request_embedding is not None:
-            await semantic.store(session, model, request_embedding, data)
+            await semantic.store(
+                session, model, cache_svc.make_params_hash(body), request_embedding, data
+            )
         return JSONResponse(
             data, headers={**common_headers, "X-Gateway-Channel": channel.name}
         )
@@ -320,7 +324,7 @@ async def chat_completions(
     # ---- 流式 ----
     try:
         resp, channel, client_wants_usage = await forwarder.open_stream(
-            client, channels, model, body, settings, fernet, breaker=app.state.breaker
+            client, channels, model, body, settings, fernet, breaker=app.state.breaker, metrics=metrics
         )
     except UpstreamError as exc:
         duration_s = perf_counter() - started_at

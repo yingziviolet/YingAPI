@@ -26,13 +26,21 @@ def extract_usage(payload: dict | None) -> tuple[int | None, int | None, int | N
     )
 
 
+def _estimate_tokens_from_text(text: str) -> int:
+    """字符数估算:CJK 约 2/3 token 每字,其余约 1/4 token 每字符。"""
+    cjk = sum(1 for ch in text if "一" <= ch <= "鿿")
+    return max(1, (len(text) - cjk) // 4 + cjk * 2 // 3)
+
+
 def estimate_prompt_tokens(body: dict) -> int:
-    """上游没给 usage 时的兜底估算:按字符数/4(记为 usage_source=estimated)。"""
+    """上游没给 usage 时的兜底估算(记为 usage_source=estimated);tools 定义也计入。"""
     try:
         text = json.dumps(body.get("messages", []), ensure_ascii=False)
+        if body.get("tools"):
+            text += json.dumps(body["tools"], ensure_ascii=False)
     except (TypeError, ValueError):
         return 0
-    return max(1, len(text) // 4)
+    return _estimate_tokens_from_text(text)
 
 
 def estimate_completion_tokens(text: str) -> int:

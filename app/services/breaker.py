@@ -25,6 +25,7 @@ class _ChannelCircuit:
     events: deque = field(default_factory=deque)
     opened_at: float = 0.0
     half_open_inflight: int = 0
+    half_open_entered_at: float = 0.0
     # 观测数据
     opened_count: int = 0  # 历史熔断次数
     last_error_rate: float = 0.0
@@ -58,13 +59,29 @@ class CircuitBreaker:
             if now - c.opened_at >= self._settings.cb_open_seconds:
                 c.state = CircuitState.HALF_OPEN
                 c.half_open_inflight = 0
+                c.half_open_entered_at = now
             else:
                 return False
+        # HALF_OPEN 自愈:探测名额可能因异常路径(如 PoolTimeout)未回写而泄漏,
+        # 超时后归零重新放探测,保证不会永久卡死
+        if (
+            c.half_open_inflight >= self._settings.cb_half_open_probes
+            and now - c.half_open_entered_at
+            > self._settings.cb_open_seconds + self._settings.cb_window_seconds
+        ):
+            c.half_open_inflight = 0
+            c.half_open_entered_at = now
         # HALF_OPEN:限量放行探测
         if c.half_open_inflight < self._settings.cb_half_open_probes:
             c.half_open_inflight += 1
             return True
         return False
+
+    def release_probe(self, channel_id: int) -> None:
+        """探测请求没有产生可判定的结果(如本地连接池耗尽):归还探测名额。"""
+        c = self._circuit(channel_id)
+        if c.state == CircuitState.HALF_OPEN and c.half_open_inflight > 0:
+            c.half_open_inflight -= 1
 
     def record_success(self, channel_id: int) -> None:
         c = self._circuit(channel_id)

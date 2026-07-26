@@ -61,6 +61,21 @@ def make_cache_key(body: dict) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def make_params_hash(body: dict) -> str:
+    """生成参数指纹(除 model/messages 外的所有影响生成的字段)。
+
+    语义缓存按 (model, params_hash) 分区:文本语义相同但 tools/response_format/
+    max_tokens 等不同的请求,不能共享响应。
+    """
+    normalized = {
+        k: body[k]
+        for k in _KEY_FIELDS
+        if k not in ("model", "messages") and body.get(k) is not None
+    }
+    payload = json.dumps(normalized, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
 async def get_cached(session: AsyncSession, cache_key: str) -> dict | None:
     result = await session.execute(select(CacheEntry).where(CacheEntry.cache_key == cache_key))
     entry = result.scalar_one_or_none()

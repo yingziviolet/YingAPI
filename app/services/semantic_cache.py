@@ -24,19 +24,26 @@ logger = logging.getLogger("gateway.semantic_cache")
 
 
 def request_text(body: dict) -> str:
-    """把 messages 规范化成一段用于 embedding 的文本。"""
+    """把 messages 规范化成一段用于 embedding 的文本。
+
+    含图片/音频/工具调用的会话无法用纯文本 embedding 完整表达——返回空串,
+    整体跳过语义缓存(精确缓存仍覆盖这类请求),避免不同输入归一化成同一文本误命中。
+    """
     parts: list[str] = []
     for message in body.get("messages", []):
         if not isinstance(message, dict):
             continue
+        if message.get("tool_calls"):
+            return ""
         role = message.get("role", "")
         content = message.get("content")
         if isinstance(content, str):
             parts.append(f"{role}: {content}")
-        elif isinstance(content, list):  # 多模态消息只取文本段
+        elif isinstance(content, list):
             for item in content:
-                if isinstance(item, dict) and item.get("type") == "text":
-                    parts.append(f"{role}: {item.get('text', '')}")
+                if not isinstance(item, dict) or item.get("type") != "text":
+                    return ""  # 非纯文本段:跳过语义缓存
+                parts.append(f"{role}: {item.get('text', '')}")
     return "\n".join(parts)
 
 
@@ -106,31 +113,49 @@ class SemanticCache:
             return None
 
     async def lookup(
-        self, session: AsyncSession, model: str, embedding: list[float]
+        self, session: AsyncSession, model: str, params_hash: str, embedding: list[float]
     ) -> tuple[dict, float] | None:
-        """在同模型、未过期的候选里找最相似条目。返回 (响应, 相似度) 或 None。"""
+        """在同 (模型, 参数指纹, embedding 模型)、未过期的候选里找最相似条目。
+
+        两阶段:先只取 (id, embedding, expires_at) 打分,命中才取完整响应行。
+        """
         now = utcnow()
         result = await session.execute(
-            select(SemanticCacheEntry)
-            .where(SemanticCacheEntry.model == model)
+            select(
+                SemanticCacheEntry.id, SemanticCacheEntry.embedding, SemanticCacheEntry.expires_at
+            )
+            .where(
+                SemanticCacheEntry.model == model,
+                SemanticCacheEntry.params_hash == params_hash,
+                SemanticCacheEntry.embedding_model == self._settings.embedding_model,
+            )
             .order_by(SemanticCacheEntry.id.desc())
             .limit(self._settings.semantic_max_candidates)
         )
-        best: SemanticCacheEntry | None = None
+        query_norm = math.sqrt(sum(x * x for x in embedding))
+        if query_norm == 0:
+            return None
+        best_id: int | None = None
         best_score = 0.0
-        for entry in result.scalars():
-            expires_at = entry.expires_at
+        for entry_id, entry_embedding, expires_at in result:
             if expires_at.tzinfo is None:
                 expires_at = expires_at.replace(tzinfo=timezone.utc)
             if expires_at <= now:
                 continue
-            score = cosine(embedding, entry.embedding)
+            if not isinstance(entry_embedding, list) or len(entry_embedding) != len(embedding):
+                continue
+            dot = sum(x * y for x, y in zip(embedding, entry_embedding))
+            entry_norm = math.sqrt(sum(x * x for x in entry_embedding))
+            score = dot / (query_norm * entry_norm) if entry_norm else 0.0
             if score > best_score:
-                best, best_score = entry, score
-        if best is not None and best_score >= self._settings.semantic_threshold:
+                best_id, best_score = entry_id, score
+        if best_id is not None and best_score >= self._settings.semantic_threshold:
+            best = await session.get(SemanticCacheEntry, best_id)
+            if best is None:
+                return None
             await session.execute(
                 update(SemanticCacheEntry)
-                .where(SemanticCacheEntry.id == best.id)
+                .where(SemanticCacheEntry.id == best_id)
                 .values(hit_count=SemanticCacheEntry.hit_count + 1)
             )
             await session.commit()
@@ -141,12 +166,15 @@ class SemanticCache:
         self,
         session: AsyncSession,
         model: str,
+        params_hash: str,
         embedding: list[float],
         response_json: dict,
     ) -> None:
         session.add(
             SemanticCacheEntry(
                 model=model,
+                params_hash=params_hash,
+                embedding_model=self._settings.embedding_model,
                 embedding=embedding,
                 response_json=response_json,
                 expires_at=utcnow() + timedelta(seconds=self._settings.cache_ttl_seconds),
@@ -159,7 +187,7 @@ class SemanticCache:
             logger.exception("semantic cache store failed")
 
     async def purge_expired(self, session: AsyncSession) -> int:
-        """清理过期条目(哨兵任务/启动时调用)。"""
+        """清理过期条目(lifespan 后台循环调用;精确缓存的过期清理也在同一循环里)。"""
         result = await session.execute(
             delete(SemanticCacheEntry).where(SemanticCacheEntry.expires_at <= utcnow())
         )

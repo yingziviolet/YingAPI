@@ -1,5 +1,7 @@
 """应用装配:app 工厂 + 生命周期(引擎/HTTP 连接池/计量器挂 app.state)。"""
+import asyncio
 import logging
+import secrets
 from contextlib import asynccontextmanager
 
 import httpx
@@ -58,6 +60,33 @@ async def dispose_state(app: FastAPI) -> None:
     await app.state.engine.dispose()
 
 
+async def _cache_purge_loop(app: FastAPI, settings: Settings) -> None:
+    """定期清理两层缓存的过期条目(store 只增,不清会无限增长)。"""
+    from sqlalchemy import delete
+
+    from app.models import CacheEntry, utcnow
+
+    interval = max(300, settings.cache_ttl_seconds)
+    while True:
+        try:
+            async with app.state.sessionmaker() as session:
+                removed_semantic = await app.state.semantic_cache.purge_expired(session)
+                result = await session.execute(
+                    delete(CacheEntry).where(CacheEntry.expires_at <= utcnow())
+                )
+                await session.commit()
+                removed_exact = result.rowcount or 0
+            if removed_semantic or removed_exact:
+                logging.getLogger("gateway.cache").info(
+                    "purged expired cache entries: exact=%d semantic=%d",
+                    removed_exact,
+                    removed_semantic,
+                )
+        except Exception:
+            logging.getLogger("gateway.cache").exception("cache purge failed")
+        await asyncio.sleep(interval)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
 
@@ -73,7 +102,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             init_state(app, settings)
         if settings.auto_create_tables:
             await create_all(app.state.engine)
+        purge_task = asyncio.create_task(_cache_purge_loop(app, settings))
         yield
+        purge_task.cancel()
+        try:
+            await purge_task
+        except asyncio.CancelledError:
+            pass
         await dispose_state(app)
         app.state.engine = None
 
@@ -123,12 +158,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok", "app": settings.app_name}
 
     @app.get("/metrics")
-    async def metrics_endpoint():
+    async def metrics_endpoint(request: Request):
         from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
         from sqlalchemy import select
 
         from app.metrics import update_circuit_gauges
         from app.models import Channel as ChannelModel
+
+        # 可选抓取鉴权(GW_METRICS_TOKEN):指标含渠道名/key 名/累计花费,对外部署应设置
+        if settings.metrics_token:
+            auth = request.headers.get("authorization", "")
+            token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+            if not token or not secrets.compare_digest(
+                token.encode("utf-8"), settings.metrics_token.encode("utf-8")
+            ):
+                raise HTTPException(status_code=401, detail="metrics token required")
 
         # 抓取时刷新熔断状态 gauge(拉模型,状态即时)
         async with app.state.sessionmaker() as session:

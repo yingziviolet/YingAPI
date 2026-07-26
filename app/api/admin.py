@@ -95,11 +95,15 @@ async def update_channel(
     if channel is None:
         raise HTTPException(status_code=404, detail="channel not found")
     data = payload.model_dump(exclude_unset=True)
+    api_key = data.pop("api_key", None)
+    # Channel 没有可空列:显式传 null 一律拒绝(否则落库时 500)
+    for field, value in data.items():
+        if value is None:
+            raise HTTPException(status_code=422, detail=f"field '{field}' cannot be null")
     # 校验合并后的最终值:只改 models 或只改 prices 也可能造成键失配
     final_models = data.get("models", channel.models)
     final_prices = data.get("prices", channel.prices)
     _validate_prices(final_models, final_prices)
-    api_key = data.pop("api_key", None)
     if api_key:
         channel.api_key_encrypted = encrypt_api_key(request.app.state.fernet, api_key)
     for field, value in data.items():
@@ -206,6 +210,9 @@ async def update_key(
     if vkey is None:
         raise HTTPException(status_code=404, detail="key not found")
     for field, value in payload.model_dump(exclude_unset=True).items():
+        # 可空列(预算/限流)允许 null=清空;其余显式 null 拒绝
+        if value is None and field not in {"monthly_budget_usd", "rpm_limit"}:
+            raise HTTPException(status_code=422, detail=f"field '{field}' cannot be null")
         setattr(vkey, field, value)
     await session.commit()
     await session.refresh(vkey)
@@ -288,24 +295,35 @@ async def stats_daily(
 
 @router.get("/stats/cache")
 async def stats_cache(session: AsyncSession = Depends(get_session)):
-    """缓存成绩单:精确/语义两层的条目数与累计命中(简历上最漂亮的数字来源)。"""
+    """缓存成绩单:精确/语义两层的有效条目数与累计命中(简历上最漂亮的数字来源)。"""
     from sqlalchemy import func
 
-    from app.models import CacheEntry, SemanticCacheEntry
+    from app.models import CacheEntry, SemanticCacheEntry, utcnow
 
+    now = utcnow()
     exact_count, exact_hits = (
         await session.execute(
-            select(func.count(CacheEntry.id), func.coalesce(func.sum(CacheEntry.hit_count), 0))
-        )
-    ).one()
-    sem_count, sem_hits = (
-        await session.execute(
             select(
-                func.count(SemanticCacheEntry.id),
-                func.coalesce(func.sum(SemanticCacheEntry.hit_count), 0),
-            )
+                func.count(CacheEntry.id), func.coalesce(func.sum(CacheEntry.hit_count), 0)
+            ).where(CacheEntry.expires_at > now)
         )
     ).one()
+    # 命中数按全表算(历史成绩),条目数只算未过期的
+    exact_hits_total = (
+        await session.execute(select(func.coalesce(func.sum(CacheEntry.hit_count), 0)))
+    ).scalar_one()
+    sem_count = (
+        await session.execute(
+            select(func.count(SemanticCacheEntry.id)).where(SemanticCacheEntry.expires_at > now)
+        )
+    ).scalar_one()
+    sem_hits_total = (
+        await session.execute(
+            select(func.coalesce(func.sum(SemanticCacheEntry.hit_count), 0))
+        )
+    ).scalar_one()
+    exact_hits = exact_hits_total
+    sem_hits = sem_hits_total
     return {
         "exact": {"entries": exact_count, "total_hits": int(exact_hits)},
         "semantic": {"entries": sem_count, "total_hits": int(sem_hits)},

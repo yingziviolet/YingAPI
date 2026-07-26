@@ -103,6 +103,10 @@ class SemanticCacheEntry(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     model: Mapped[str] = mapped_column(String(128), index=True)
+    # 生成参数指纹(tools/response_format/max_tokens 等):语义相同但参数不同的请求不能共享响应
+    params_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # 产生该向量的 embedding 模型:换模型后新旧向量空间不能混算
+    embedding_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     embedding: Mapped[list] = mapped_column(JSON)
     response_json: Mapped[dict] = mapped_column(JSON)
     hit_count: Mapped[int] = mapped_column(Integer, default=0)

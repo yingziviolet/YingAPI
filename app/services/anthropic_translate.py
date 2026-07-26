@@ -39,11 +39,22 @@ def _tool_result_text(content) -> str:
     return json.dumps(content, ensure_ascii=False) if content is not None else ""
 
 
+def _image_part(block: dict) -> dict | None:
+    source = block.get("source") or {}
+    if source.get("type") == "base64":
+        uri = f"data:{source.get('media_type', 'image/png')};base64,{source.get('data', '')}"
+        return {"type": "image_url", "image_url": {"url": uri}}
+    if source.get("type") == "url":
+        return {"type": "image_url", "image_url": {"url": source.get("url", "")}}
+    return None
+
+
 def _user_blocks_to_openai(blocks: list) -> tuple[list[dict], list | str | None]:
     """把 user turn 的内容块拆成 (OpenAI tool 消息列表, user content)。
 
     Anthropic 的 tool_result 出现在 user turn 里;OpenAI 要求它们是独立的
-    role=tool 消息且排在后续 user 文本之前。
+    role=tool 消息且排在后续 user 文本之前。tool_result 里的图片块转成紧随
+    其后的 user 图片段(OpenAI 的 tool 消息不能带图,user 可以)。
     """
     tool_messages: list[dict] = []
     parts: list[dict] = []
@@ -53,6 +64,17 @@ def _user_blocks_to_openai(blocks: list) -> tuple[list[dict], list | str | None]
         btype = block.get("type")
         if btype == "tool_result":
             text = _tool_result_text(block.get("content"))
+            images = []
+            if isinstance(block.get("content"), list):
+                for inner in block["content"]:
+                    if isinstance(inner, dict) and inner.get("type") == "image":
+                        part = _image_part(inner)
+                        if part:
+                            images.append(part)
+            if images:
+                note = f"[tool returned {len(images)} image(s); attached in the following user message]"
+                text = f"{text}\n{note}" if text else note
+                parts.extend(images)
             if block.get("is_error"):
                 text = f"[tool error] {text}"
             tool_messages.append(
@@ -61,12 +83,9 @@ def _user_blocks_to_openai(blocks: list) -> tuple[list[dict], list | str | None]
         elif btype == "text":
             parts.append({"type": "text", "text": block.get("text", "")})
         elif btype == "image":
-            source = block.get("source") or {}
-            if source.get("type") == "base64":
-                uri = f"data:{source.get('media_type', 'image/png')};base64,{source.get('data', '')}"
-                parts.append({"type": "image_url", "image_url": {"url": uri}})
-            elif source.get("type") == "url":
-                parts.append({"type": "image_url", "image_url": {"url": source.get("url", "")}})
+            part = _image_part(block)
+            if part:
+                parts.append(part)
         # thinking / document 等其余块类型:丢弃(网关不透传推理内容)
 
     if not parts:
@@ -142,6 +161,12 @@ def anthropic_to_openai_request(body: dict) -> dict:
                 out_messages.append(_assistant_blocks_to_openai(content))
             else:
                 raise TranslateError("assistant message content must be a string or a list of blocks")
+        elif role == "system":
+            # Anthropic 支持 messages 里的 system turn(mid-conversation system message)
+            text = _system_text(content)
+            if text is None:
+                raise TranslateError("system message content must be a string or a list of text blocks")
+            out_messages.append({"role": "system", "content": text})
         else:
             raise TranslateError(f"unsupported message role: {role!r}")
 
@@ -196,12 +221,14 @@ def anthropic_to_openai_request(body: dict) -> dict:
 
 # ---------- 响应翻译:OpenAI -> Anthropic ----------
 
+# 注:OpenAI 命中 stop 序列时只返回 finish_reason="stop" 且不告知命中项,
+# 故本网关不会产生 Anthropic 的 "stop_sequence" 值(恒 end_turn / stop_sequence=null)
 _STOP_REASON = {
     "stop": "end_turn",
     "length": "max_tokens",
     "tool_calls": "tool_use",
     "function_call": "tool_use",
-    "content_filter": "end_turn",
+    "content_filter": "refusal",
 }
 
 
@@ -275,10 +302,17 @@ class AnthropicStreamTranslator:
         self._block_index = -1
         self._block_type: str | None = None  # "text" | "tool_use"
         self._openai_tool_index: int | None = None
+        self._tool_id: str | None = None
         self.finish_reason: str | None = None
         self.usage: dict | None = None
         self.output_chars = 0
         self._input_tokens_estimate = input_tokens_estimate
+
+    def start(self) -> list[bytes]:
+        """立即产出 message_start(幂等):不必等上游首 chunk。"""
+        out: list[bytes] = []
+        self._ensure_started(out)
+        return out
 
     def _ensure_started(self, out: list[bytes]) -> None:
         if self._started:
@@ -313,6 +347,7 @@ class AnthropicStreamTranslator:
             )
             self._block_type = None
             self._openai_tool_index = None
+            self._tool_id = None
 
     def _open_text_block(self, out: list[bytes]) -> None:
         self._close_block(out)
@@ -334,6 +369,7 @@ class AnthropicStreamTranslator:
         self._block_index += 1
         self._block_type = "tool_use"
         self._openai_tool_index = openai_index
+        self._tool_id = tool_id
         out.append(
             _event(
                 "content_block_start",
@@ -375,7 +411,12 @@ class AnthropicStreamTranslator:
         for tc in delta.get("tool_calls") or []:
             openai_index = tc.get("index", 0)
             function = tc.get("function") or {}
-            if self._block_type != "tool_use" or self._openai_tool_index != openai_index:
+            # 切块条件除 index 外还看 id:部分上游并行工具调用全用 index 0,靠新 id 区分
+            if (
+                self._block_type != "tool_use"
+                or self._openai_tool_index != openai_index
+                or (tc.get("id") and tc.get("id") != self._tool_id)
+            ):
                 self._open_tool_block(
                     out,
                     tool_id=tc.get("id") or f"toolu_{secrets.token_hex(8)}",
@@ -404,18 +445,20 @@ class AnthropicStreamTranslator:
         out: list[bytes] = []
         self._ensure_started(out)  # 空响应也要有完整事件序列
         self._close_block(out)
-        output_tokens = (
-            (self.usage or {}).get("completion_tokens")
-            if self.usage
-            else max(1, self.output_chars // 4)
-        )
+        upstream = self.usage or {}
+        ct = upstream.get("completion_tokens")
+        output_tokens = ct if isinstance(ct, int) else max(1, self.output_chars // 4)
+        usage_out: dict = {"output_tokens": output_tokens}
+        pt = upstream.get("prompt_tokens")
+        if isinstance(pt, int):  # 上游给了准确 input_tokens 就回填(替代 message_start 里的估算)
+            usage_out["input_tokens"] = pt
         out.append(
             _event(
                 "message_delta",
                 {
                     "type": "message_delta",
                     "delta": {"stop_reason": map_stop_reason(self.finish_reason), "stop_sequence": None},
-                    "usage": {"output_tokens": output_tokens or 0},
+                    "usage": usage_out,
                 },
             )
         )
