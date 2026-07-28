@@ -7,6 +7,7 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
 
 ROOT = Path(SPECPATH).parent  # noqa: F821 - SPECPATH 由 PyInstaller 注入
+ICON = ROOT / "packaging" / "assets" / "ying.ico"
 # 调试构建:GW_BUILD_CONSOLE=1 保留控制台窗口以便看 traceback
 SHOW_CONSOLE = os.environ.get("GW_BUILD_CONSOLE") == "1"
 
@@ -55,9 +56,9 @@ exe = EXE(  # noqa: F821
     a.scripts,
     [],
     exclude_binaries=True,
-    name="LLMGateway",
+    name="Ying",
     console=SHOW_CONSOLE,  # 发行版无控制台窗口(托盘模式);调试版可开
-    icon=None,
+    icon=str(ICON),
 )
 coll = COLLECT(  # noqa: F821
     exe,
@@ -65,5 +66,5 @@ coll = COLLECT(  # noqa: F821
     a.datas,
     strip=False,
     upx=False,
-    name="LLMGateway",
+    name="Ying",
 )

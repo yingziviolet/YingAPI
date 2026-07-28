@@ -15,4 +15,6 @@ dist-debug/
 build/
 build-debug/
 packaging/output/
+release/
+.tmp/
 *.spec.bak
