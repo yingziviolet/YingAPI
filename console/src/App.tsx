@@ -18,6 +18,7 @@ import Dashboard from './pages/Dashboard'
 import Insights from './pages/Insights'
 import Keys from './pages/Keys'
 import LiveTail from './pages/LiveTail'
+import Setup from './pages/Setup'
 import Subscription from './pages/Subscription'
 
 type Tab = 'dashboard' | 'channels' | 'keys' | 'livetail' | 'insights' | 'alerts' | 'subscription'
@@ -34,6 +35,7 @@ const NAV: { key: Tab; label: string; icon: typeof Gauge; desc: string }[] = [
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null)
+  const [needSetup, setNeedSetup] = useState<boolean | null>(null)
   const [tab, setTab] = useState<Tab>('dashboard')
   const [alertCount, setAlertCount] = useState(0)
 
@@ -71,6 +73,11 @@ export default function App() {
 
   useEffect(() => {
     if (!authed) return
+    // 首次使用(没有渠道或没有 key)直接进引导页
+    api
+      .setupState()
+      .then((s) => setNeedSetup(!s.configured))
+      .catch(() => setNeedSetup(false))
     const load = () => api.alerts().then((a) => setAlertCount(a.length)).catch(() => {})
     load()
     const timer = setInterval(load, 15000)
@@ -86,6 +93,17 @@ export default function App() {
   }
   if (!authed) return <Login onSuccess={() => setAuthed(true)} />
 
+  if (needSetup) {
+    return (
+      <div className="flex h-full flex-col bg-surface">
+        <TitleBar />
+        <main className="stage-wash min-h-0 flex-1 overflow-auto px-6">
+          <Setup onDone={() => setNeedSetup(false)} />
+        </main>
+      </div>
+    )
+  }
+
   const active = NAV.find((n) => n.key === tab)!
 
   return (
@@ -99,8 +117,8 @@ export default function App() {
             <div className="flex items-center gap-2.5 rounded-xl bg-surface-card px-3 py-2.5 shadow-sm">
               <Logo size={30} />
               <div className="min-w-0">
-                <div className="truncate text-[13px] font-semibold text-ink-hi">LLM 网关</div>
-                <div className="truncate text-[10.5px] text-ink-low">数据面 + 控制面</div>
+                <div className="truncate text-[13px] font-semibold text-ink-hi">Ying</div>
+                <div className="truncate text-[10.5px] text-ink-low">LLM 网关</div>
               </div>
             </div>
           </div>
@@ -248,8 +266,8 @@ function Login({ onSuccess }: { onSuccess: () => void }) {
           <div className="mb-6 flex items-center gap-3">
             <Logo size={40} />
             <div>
-              <div className="text-[17px] font-bold tracking-tight text-ink-hi">LLM 网关控制台</div>
-              <div className="text-[12px] text-ink-mid">数据面 + 控制面</div>
+              <div className="text-[17px] font-bold tracking-tight text-ink-hi">Ying</div>
+              <div className="text-[12px] text-ink-mid">LLM 网关控制台</div>
             </div>
           </div>
           <form

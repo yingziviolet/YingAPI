@@ -2,8 +2,10 @@
 
 鉴权:Bearer <GW_ADMIN_TOKEN>。后续 React 控制台直接对接这组接口。
 """
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -271,6 +273,128 @@ async def key_spend(key_id: int, session: AsyncSession = Depends(get_session)):
         "name": vkey.name,
         "month_to_date_usd": round(spent, 6),
         "monthly_budget_usd": vkey.monthly_budget_usd,
+    }
+
+
+# ---------- 开箱引导:一步完成首次配置 ----------
+
+
+@router.get("/setup/state")
+async def setup_state(request: Request, session: AsyncSession = Depends(get_session)):
+    """控制台判断要不要显示引导页。"""
+    channels = (await session.execute(select(func.count(Channel.id)))).scalar_one()
+    keys = (await session.execute(select(func.count(VirtualKey.id)))).scalar_one()
+    return {
+        "configured": channels > 0 and keys > 0,
+        "channels": int(channels),
+        "keys": int(keys),
+        "port": int(os.environ.get("GW_PUBLIC_PORT", "0")) or (request.url.port or 8080),
+    }
+
+
+@router.post("/setup/quickstart")
+async def setup_quickstart(request: Request, session: AsyncSession = Depends(get_session)):
+    """粘贴一个 API key 就能用:识别厂商 -> 建渠道 -> 发虚拟 key,一步到位。
+
+    body: {api_key, base_url?, name?, models?, verify?}
+    """
+    from app.services.balance import fetch_balance
+    from app.services.forwarder import _timeout
+    from app.services.importer import detect_provider
+
+    body = await request.json()
+    api_key = (body.get("api_key") or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="请提供 API key")
+
+    preset = detect_provider(api_key)
+    base_url = (body.get("base_url") or (preset or {}).get("base_url") or "").strip()
+    if not base_url:
+        raise HTTPException(
+            status_code=400,
+            detail="无法识别该 key 属于哪家厂商,请补充 Base URL(形如 https://api.xxx.com/v1)",
+        )
+    models = body.get("models") or list((preset or {}).get("models") or [])
+    if not models:
+        raise HTTPException(status_code=400, detail="请提供至少一个模型名")
+    prices = dict((preset or {}).get("prices") or {})
+    prices = {k: v for k, v in prices.items() if k in models}
+    name = (body.get("name") or (preset or {}).get("provider") or "my-channel").strip()
+
+    fernet = request.app.state.fernet
+    client = request.app.state.upstream_client
+    settings = request.app.state.settings
+
+    # 先验通不通:key 错了就别建了,直接告诉用户
+    if body.get("verify", True):
+        try:
+            resp = await client.post(
+                base_url.rstrip("/") + "/chat/completions",
+                json={"model": models[0], "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1},
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=_timeout(settings),
+            )
+            if resp.status_code in (401, 403):
+                raise HTTPException(status_code=400, detail="鉴权失败,请检查 API key 是否正确")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"无法连接到 {base_url}({exc!r})")
+
+    # 建渠道(重名顺延)
+    existing = {n for (n,) in (await session.execute(select(Channel.name))).all()}
+    final_name, suffix = name, 2
+    while final_name in existing:
+        final_name = f"{name}-{suffix}"
+        suffix += 1
+    channel = Channel(
+        name=final_name,
+        provider=(preset or {}).get("provider") or "openai",
+        base_url=base_url,
+        api_key_encrypted=encrypt_api_key(fernet, api_key),
+        models=models,
+        model_map={},
+        prices=prices,
+        priority=10,
+        enabled=True,
+    )
+    session.add(channel)
+    await session.commit()
+    await session.refresh(channel)
+
+    # 发一把默认虚拟 key(客户端拿它连网关)
+    key_name = "default"
+    key_exists = {n for (n,) in (await session.execute(select(VirtualKey.name))).all()}
+    idx = 2
+    while key_name in key_exists:
+        key_name = f"default-{idx}"
+        idx += 1
+    raw = generate_virtual_key()
+    vkey = VirtualKey(
+        name=key_name,
+        key_hash=hash_virtual_key(raw),
+        key_masked=mask_key(raw),
+        note="首次配置自动创建",
+    )
+    session.add(vkey)
+    await session.commit()
+    await session.refresh(vkey)
+
+    balance = None
+    try:
+        result = await fetch_balance(client, channel, fernet)
+        if result.get("ok"):
+            balance = result.get("balance")
+    except Exception:
+        pass
+
+    port = int(os.environ.get("GW_PUBLIC_PORT", "0")) or (request.url.port or 8080)
+    return {
+        "channel": {"id": channel.id, "name": channel.name, "models": channel.models},
+        "key": {"id": vkey.id, "name": vkey.name, "key": raw},
+        "balance": balance,
+        "base_url": f"http://127.0.0.1:{port}/v1",
+        "anthropic_base_url": f"http://127.0.0.1:{port}",
     }
 
 

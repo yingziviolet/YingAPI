@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Copy, KeyRound, LayoutGrid, List, Plus, Power, Trash2 } from 'lucide-react'
+import {
+  Copy,
+  HelpCircle,
+  KeyRound,
+  LayoutGrid,
+  List,
+  Plus,
+  Power,
+  ShieldCheck,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { api, fmtUsd } from '../api'
 import type { KeySpend, VirtualKey } from '../types'
 import KeyCard from '../components/KeyCard'
@@ -14,6 +25,7 @@ export default function Keys() {
     () => (localStorage.getItem('gw_keys_view') as View) || 'grid',
   )
   const [showCreate, setShowCreate] = useState(false)
+  const [showWhat, setShowWhat] = useState(false)
   const [newName, setNewName] = useState('')
   const [newNote, setNewNote] = useState('')
   const [newBudget, setNewBudget] = useState('')
@@ -94,15 +106,24 @@ export default function Keys() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-[12.5px] text-ink-mid">
-          每个客户端一把独立 key,配独立预算与限流——泄漏时能精确定位到具体 key
+          发给客户端使用的替身 key,你的真 key 永远不出网关
         </p>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowWhat((v) => !v)}
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[12px] text-ink-mid transition-colors hover:bg-surface-hover hover:text-ink-hi"
+          >
+            <HelpCircle size={14} />
+            这是干什么的?
+          </button>
           <ViewToggle view={view} onChange={switchView} />
           <Button kind="primary" onClick={() => setShowCreate((v) => !v)}>
             <Plus size={14} />发放 Key
           </Button>
         </div>
       </div>
+
+      {showWhat && <WhatIsVirtualKey onClose={() => setShowWhat(false)} />}
 
       {showCreate && (
         <Card title="发放虚拟 Key" desc="原文只在创建时显示一次,只存哈希">
@@ -205,6 +226,84 @@ export default function Keys() {
         </Card>
       )}
     </div>
+  )
+}
+
+function WhatIsVirtualKey({ onClose }: { onClose: () => void }) {
+  return (
+    <Card>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1">
+          <div className="mb-3 flex items-center gap-2">
+            <ShieldCheck size={17} className="text-brand" />
+            <h3 className="text-[14px] font-semibold text-ink-hi">虚拟 Key 是做什么的</h3>
+          </div>
+
+          <div className="mb-4 rounded-lg border border-line bg-surface-sunken p-4">
+            <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+              <Box label="你的客户端" sub="IDE / 脚本 / Claude Code" />
+              <Arrow text="虚拟 key" tone="brand" />
+              <Box label="Ying 网关" sub="真 key 加密存这里" highlight />
+              <Arrow text="真实 key" tone="mid" />
+              <Box label="上游厂商" sub="DeepSeek / Kimi …" />
+            </div>
+          </div>
+
+          <ul className="space-y-2.5 text-[12.5px] leading-relaxed text-ink">
+            <Item title="真 key 不外泄">
+              客户端只拿到 <code className="rounded bg-surface-sunken px-1">sk-gw-</code> 开头的替身。
+              给同事、给某个不太放心的程序用,都不用交出真 key。
+            </Item>
+            <Item title="花的钱能分清是谁">
+              每个客户端一把 key,大盘上就能看出 IDE 花了多少、某个 agent 花了多少。
+            </Item>
+            <Item title="逐把限额限速">
+              给实验性脚本配 5 美元月预算和每分钟 10 次,跑飞了也烧不穿。
+            </Item>
+            <Item title="泄漏了只换一把">
+              某把 key 泄漏,点「轮换」立刻作废重发——真 key 不用动,其他客户端照常工作。
+            </Item>
+          </ul>
+        </div>
+        <button onClick={onClose} className="rounded-lg p-1.5 text-ink-mid hover:bg-surface-hover hover:text-ink-hi">
+          <X size={16} />
+        </button>
+      </div>
+    </Card>
+  )
+}
+
+function Box({ label, sub, highlight }: { label: string; sub: string; highlight?: boolean }) {
+  return (
+    <div
+      className={`rounded-lg border px-3 py-2 ${
+        highlight ? 'border-brand-ring bg-brand-soft' : 'border-line bg-surface-card'
+      }`}
+    >
+      <div className={`font-medium ${highlight ? 'text-brand' : 'text-ink-hi'}`}>{label}</div>
+      <div className="text-[10.5px] text-ink-low">{sub}</div>
+    </div>
+  )
+}
+
+function Arrow({ text, tone }: { text: string; tone: 'brand' | 'mid' }) {
+  return (
+    <div className="flex flex-col items-center px-1">
+      <span className={`text-[10.5px] ${tone === 'brand' ? 'text-brand' : 'text-ink-low'}`}>{text}</span>
+      <span className={tone === 'brand' ? 'text-brand' : 'text-ink-low'}>→</span>
+    </div>
+  )
+}
+
+function Item({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <li className="flex gap-2">
+      <span className="mt-1.5 h-1.5 w-1.5 flex-none rounded-full bg-brand" />
+      <span>
+        <b className="text-ink-hi">{title}</b>
+        <span className="text-ink-mid"> —— {children}</span>
+      </span>
+    </li>
   )
 }
 

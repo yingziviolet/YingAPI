@@ -43,6 +43,11 @@ def make_upstream(state: dict) -> FastAPI:
             return JSONResponse(
                 {"error": {"message": "rate limited", "type": "rate_limit_error"}}, status_code=429
             )
+        if mode == "fail-401":
+            return JSONResponse(
+                {"error": {"message": "invalid api key", "type": "authentication_error"}},
+                status_code=401,
+            )
         if mode == "fail-400":
             return JSONResponse(
                 {"error": {"message": "bad params", "type": "invalid_request_error"}},

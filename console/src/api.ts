@@ -125,6 +125,11 @@ export const api = {
     }),
   importBilling: (text: string) =>
     request<any>('/admin/import/billing', { method: 'POST', body: JSON.stringify({ text }) }),
+
+  setupState: () =>
+    request<{ configured: boolean; channels: number; keys: number; port: number }>('/admin/setup/state'),
+  quickstart: (body: object) =>
+    request<any>('/admin/setup/quickstart', { method: 'POST', body: JSON.stringify(body) }),
 }
 
 export function liveTailUrl(): string {

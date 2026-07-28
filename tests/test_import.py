@@ -216,7 +216,10 @@ def test_bootstrap_gives_token_on_loopback(tmp_path):
     with TestClient(app, client=("127.0.0.1", 5000)) as tc:
         resp = tc.get("/bootstrap")
         assert resp.status_code == 200
-        assert resp.json() == {"auto": True, "token": "local-token"}
+        data = resp.json()
+        assert data["auto"] is True
+        assert data["token"] == "local-token"
+        assert data["port"]  # 控制台用它拼客户端配置示例
 
 
 def test_bootstrap_disabled_by_config(tmp_path):

@@ -1,7 +1,7 @@
 # LLM 智能网关(数据面 + 控制面)
 
-> 🚀 **怎么启动、面试怎么讲、还剩什么** → 看 [INTERVIEW.md](INTERVIEW.md)
-> 📋 **详细进度与待办(交接文档)** → 看 [ROADMAP.md](ROADMAP.md)
+> 🚀 **三步跑起来** → [QUICKSTART.md](QUICKSTART.md)
+> 📋 **进度与待办** → [ROADMAP.md](ROADMAP.md)
 
 自研 LLM 网关基础设施:**数据面**(OpenAI 兼容异步流式转发、精确缓存、静态优先级路由 + failover、token 级计量)+ **控制面**(渠道管理、虚拟 key、用量统计 API;React 控制台在 P3)。
 

@@ -1,6 +1,7 @@
 """应用装配:app 工厂 + 生命周期(引擎/HTTP 连接池/计量器挂 app.state)。"""
 import asyncio
 import logging
+import os
 import secrets
 from contextlib import asynccontextmanager
 
@@ -183,7 +184,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         client_host = request.client.host if request.client else ""
         if not settings.local_auto_auth or client_host not in ("127.0.0.1", "::1", "localhost"):
             return JSONResponse({"auto": False}, status_code=403)
-        return {"auto": True, "token": settings.admin_token}
+        return {
+            "auto": True,
+            "token": settings.admin_token,
+            # 控制台用它拼客户端配置示例(单机版端口是自动选的,不一定是 8080)
+            "port": int(os.environ.get("GW_PUBLIC_PORT", "0")) or request.url.port or 8080,
+            "standalone": bool(os.environ.get("GW_PUBLIC_PORT")),
+        }
 
     @app.get("/metrics")
     async def metrics_endpoint(request: Request):
