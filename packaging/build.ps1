@@ -26,7 +26,15 @@ try {
 
 New-Item -ItemType Directory -Force -Path $release | Out-Null
 $portable = Join-Path $release "Ying-portable.zip"
-Compress-Archive -Path (Join-Path $root "dist\Ying\*") -DestinationPath $portable -Force
+for ($attempt = 1; $attempt -le 5; $attempt++) {
+    try {
+        Compress-Archive -Path (Join-Path $root "dist\Ying\*") -DestinationPath $portable -Force
+        break
+    } catch {
+        if ($attempt -eq 5) { throw }
+        Start-Sleep -Milliseconds (500 * $attempt)
+    }
+}
 
 Write-Host "[3/4] Building installer..." -ForegroundColor Cyan
 $iscc = Get-Command iscc -ErrorAction SilentlyContinue
