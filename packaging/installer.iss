@@ -3,7 +3,7 @@
 ;   1) cd console && npm run build
 ;   2) pyinstaller packaging/gateway.spec --noconfirm
 ;   3) iscc packaging/installer.iss
-; 产物:packaging/output/LLMGateway-Setup-<版本>.exe
+; 产物:packaging/output/Ying-Setup-<版本>.exe
 
 #define AppName "Ying"
 ; CI 里用 iscc /DAppVersion=x.y.z 按 git tag 覆盖;本地构建用默认值
@@ -53,5 +53,5 @@ Name: "{userstartup}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: startu
 Filename: "{app}\{#AppExeName}"; Description: "立即启动网关"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; 只删程序目录残留;用户数据(%LOCALAPPDATA%\LLMGateway)保留
+; 只删程序目录残留;用户数据(%LOCALAPPDATA%\Ying 或兼容的旧目录)保留
 Type: filesandordirs; Name: "{app}\_internal"

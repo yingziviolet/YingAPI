@@ -2,15 +2,15 @@
 
 ## Windows 单机版(推荐)
 
-1. 下载 `LLMGateway-Setup-x.y.z.exe`(安装包)或 `LLMGateway-portable.zip`(免安装)
+1. 下载 `Ying-Setup-x.y.z.exe`(安装包)或 `Ying-portable.zip`(免安装)
 2. 双击运行 —— 应用窗口自动打开
 3. 粘贴一个你自己的 API key,点「开始使用」
 4. 把界面给出的两行配置复制到你的客户端
 
-就这三步,没有别的。
+就这几步,没有别的。
 
-数据全部保存在 `%LOCALAPPDATA%\LLMGateway`(SQLite 数据库、加密密钥、日志),
-卸载不会删除,想彻底清理手动删这个目录即可。
+新安装的数据保存在 `%LOCALAPPDATA%\Ying`(SQLite 数据库、加密密钥、日志)。
+旧版 `%LOCALAPPDATA%\LLMGateway` 存在时会继续复用;卸载不会删除用户数据。
 
 ### 接入客户端
 
@@ -45,6 +45,10 @@ export ANTHROPIC_AUTH_TOKEN=sk-gw-网关发给你的虚拟key
 **想看日志?**
 托盘图标右键 → 打开数据目录,里面的 `gateway.log`。
 
+**Windows 提示“未知发布者”?**
+当前安装包尚未购买代码签名证书。请只从本仓库的 GitHub Releases 下载,并用同页
+`SHA256SUMS.txt` 核对文件;不要关闭 SmartScreen。
+
 ---
 
 ## 从源码运行
@@ -75,8 +79,8 @@ cd console && npm run dev
 powershell -ExecutionPolicy Bypass -File packaging\build.ps1
 ```
 
-三步产物:前端构建 → PyInstaller 打包(`dist\LLMGateway\`)→ Inno Setup 安装包
-(`packaging\output\`,需先安装 Inno Setup 6;没装则只出免安装版)。
+构建产物:`release\Ying-portable.zip`、`release\Ying-Setup-1.0.0.exe` 和
+`release\SHA256SUMS.txt`。完整构建需要先安装 Inno Setup 6。
 
 ## 服务器部署
 

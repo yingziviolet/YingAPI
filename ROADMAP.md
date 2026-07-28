@@ -4,7 +4,7 @@
 > 记录**已完成什么、为什么这么设计、还剩什么、以及有意不做什么**。
 > 架构总方案见 [智能网关-全栈架构.md](智能网关-全栈架构.md)(已收敛,勿重新发散选型)。
 
-最后更新:2026-07-27
+最后更新:2026-07-28
 
 ---
 
@@ -26,9 +26,9 @@
 
 ---
 
-## 二、已完成(全部已推送 GitHub)
+## 二、已完成
 
-仓库:`github.com/yingziviolet/YingAPI`,分支 `main`。
+仓库:`github.com/yingziviolet/YingAPI`;Windows 1.0 当前位于 `feat/ying-windows-1.0`,测试完成前不合并 `main`。
 
 ### P1 透明代理
 - `POST /v1/chat/completions`:非流式 + SSE 流式透传(chunk 到达即转发,首 token 延迟不劣化)
@@ -70,35 +70,30 @@ Vite + React + TS + Tailwind v4 + ECharts,构建产物由 FastAPI 托管于 `/co
 
 ### 交付形态
 - **Docker Compose**:Postgres(pgvector 镜像)+ Redis + 网关
-- **Windows exe** `packaging/`:PyInstaller 打包,pywebview 原生窗口(WebView2,与 Tauri 同款观感),数据全在 `%LOCALAPPDATA%\LLMGateway`;`installer.iss` 出 Inno Setup 安装包
+- **Windows exe** `packaging/`:PyInstaller 打包,pywebview 原生窗口(WebView2),失败自动回退浏览器,单实例运行;新数据在 `%LOCALAPPDATA%\Ying`,旧版目录存在时继续复用
+- **Windows 发布包**:`Ying-portable.zip`、`Ying-Setup-1.0.0.exe`、`SHA256SUMS.txt`;安装/卸载、快捷方式与用户数据保留均已实测
 - CI:GitHub Actions 跑测试 + 前端构建 + Docker 构建
 
 ### 质量保障
-- **94+ 个测试**全过(内嵌 ASGI 假上游,全链路不出进程)
+- **128 个测试**全过(内嵌 ASGI 假上游,全链路不出进程)
 - **两轮多智能体对抗性审查**:
   - 第一轮(P1):29 个发现 / 26 确认,全部修复
   - 第二轮(P2/P2.5):26 个发现 / 25 确认,全部修复
   - 修复的典型问题:语义缓存跨参数误命中、熔断器半开名额永久泄漏、Anthropic 流式断连泄漏上游连接、Redis 限流 check-then-act 竞态
-- 数据库迁移链 0001→0006,每次都在干净库上验证过
+- 数据库迁移链 0001→0007,每次都在干净库上验证过
 
 ---
 
-## 三、进行中(本次会话未完成的部分)
+## 三、Windows 1.0 分支与后续
 
-### 1. 浅色主题(改了一半)
-- ✅ `console/src/index.css`:`.light` 类重定义 Tailwind 颜色变量,整体翻转主题;默认浅色
-- ✅ `console/src/theme.ts`:主题切换 + localStorage 持久化
-- ✅ `console/src/main.tsx`:渲染前套用主题避免闪烁
-- ✅ `console/src/App.tsx`:侧栏加主题切换按钮
-- ✅ `console/src/components/Chart.tsx`:`chartTheme()` / `chartLegend()` 改成按主题取色的函数
-- ⬜ **待办**:所有页面里 ECharts 的图例/网格颜色已改函数式调用,但**需要实际跑一遍浅色模式,检查各页对比度**(尤其 Badge 颜色、图表 tooltip 背景)
+### 本分支已完成
+- 首次启动引导:粘贴上游 API key → 自动识别渠道 → 创建虚拟 key → 输出客户端配置
+- Ying 品牌、应用图标、浅色/深色首次启动页
+- pywebview 原生窗口、浏览器回退、单实例保护
+- 便携 ZIP、Inno Setup 安装包、SHA-256 校验文件
+- 全新配置启动、安装、快捷方式、卸载与用户数据保留烟雾测试
 
-### 2. 图表遮挡修复(已改,待验证)
-- 症状:数据点少时 ECharts 默认图例会飘到 X 轴标签上,互相遮挡
-- 已改:`grid.top` 44 给图例留位、`grid.bottom` 36 给轴标签留位、图例固定 `top: 0`、柱子加 `barMaxWidth: 48`(数据少时柱子不会撑得过宽)
-- ⬜ **待办**:实际截图验证
-
-### 3. 渠道余额查询(后端已完成,前端未接)
+### 渠道余额查询(后端已完成,前端未接)
 - ✅ `app/services/balance.py`:多探针自动探测余额接口
   - DeepSeek `GET /user/balance`
   - Moonshot/Kimi `GET /v1/users/me/balance`
@@ -114,32 +109,24 @@ Vite + React + TS + Tailwind v4 + ECharts,构建产物由 FastAPI 托管于 `/co
   - 创建渠道表单加 `balance_url` 输入
   - 写测试(mock 各家余额接口响应)
 
-### 4. pywebview 原生窗口(已写,未构建验证)
-- ✅ `packaging/launcher.py` 加 `run_window()`:pywebview 开原生窗口,预置 token 进 localStorage 免手输;失败回退浏览器+托盘
-- ⬜ **待办**:
-  - `pip install pywebview`,加进 `packaging/build.ps1` 和 spec 的 hiddenimports
-  - 实际构建 exe 验证窗口能开、控制台能正常渲染
-  - 窗口图标(现在是默认图标)
-
 ---
 
 ## 四、待办清单(按优先级)
 
 ### 高优先级(补完当前半成品)
 1. **前端接余额显示**——渠道面板余额列、大盘汇总卡、创建表单加 balance_url
-2. **构建验证 pywebview 窗口**——装依赖、改 spec、出 exe 实测
-3. **浅色主题走查**——七个页面逐个看对比度,修不协调的地方
-4. **给 P3.5/P4/exe 这批新代码做第三轮对抗性审查**(前两轮只覆盖到 P2.5)
+2. **全控制台主题走查**——七个业务页逐个看浅色/深色对比度与图表遮挡
+3. **给 P3.5/P4/exe 这批新代码做第三轮对抗性审查**(前两轮只覆盖到 P2.5)
 
 ### 中优先级(路线图剩余项)
-5. **GitHub Releases 自动发布流水线**——打 tag 触发 CI,自动构建 exe/安装包并挂到 Release 页面(就是别人仓库那种下载页)。`packaging/installer.iss` 已支持 `iscc /DAppVersion=x.y.z` 按 tag 覆盖版本号
-6. **质量回评**——抽样用强模型复评被降级的答案,证明"降级不降质"(这是难度感知路由在面试里最有说服力的一环)
-7. **语义缓存 pgvector 索引化**——现在是应用层余弦匹配(候选上限 500),数据量上来后迁到 pgvector 向量索引。表结构已按可平滑迁移设计
+4. **GitHub Releases 自动发布流水线**——打 tag 触发 CI,自动构建 exe/安装包并挂到 Release 页面。当前 1.0 先用已验证的本地产物发布
+5. **质量回评**——抽样用强模型复评被降级的答案,证明"降级不降质"
+6. **语义缓存 pgvector 索引化**——现在是应用层余弦匹配(候选上限 500),数据量上来后迁到 pgvector 向量索引
 
 ### 低优先级 / 可选
-8. 账单 CSV/JSON 导入——补「切到网关之前」的历史消费数据
-9. 渠道权重路由(现在只有静态优先级)
-10. macOS/Linux 打包(现在只做了 Windows)
+7. 账单 CSV/JSON 导入——补「切到网关之前」的历史消费数据
+8. 渠道权重路由(现在只有静态优先级)
+9. macOS/Linux 打包(现在只做了 Windows)
 
 ---
 
@@ -189,7 +176,7 @@ python C:\Users\ADMINI~1\AppData\Local\Temp\claude\...\scratchpad\fake_upstream.
 ```powershell
 powershell -ExecutionPolicy Bypass -File packaging\build.ps1
 ```
-产物:`dist\LLMGateway\LLMGateway.exe`(免安装)、`packaging\output\*.exe`(安装包,需先装 Inno Setup 6)
+产物:`release\Ying-portable.zip`、`release\Ying-Setup-1.0.0.exe`、`release\SHA256SUMS.txt`(需先装 Inno Setup 6)
 
 ### 数据库迁移
 ```bash
@@ -262,6 +249,6 @@ packaging/
   gateway.spec         # PyInstaller 配置
   installer.iss        # Inno Setup 安装包
   build.ps1            # 一键构建
-tests/                 # 94+ 测试
-alembic/versions/      # 迁移 0001-0006
+tests/                 # 128 个测试
+alembic/versions/      # 迁移 0001-0007
 ```

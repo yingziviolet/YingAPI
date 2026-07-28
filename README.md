@@ -1,13 +1,13 @@
-# LLM 智能网关(数据面 + 控制面)
+# Ying — LLM 智能网关(数据面 + 控制面)
 
 > 🚀 **三步跑起来** → [QUICKSTART.md](QUICKSTART.md)
 > 📋 **进度与待办** → [ROADMAP.md](ROADMAP.md)
 
 自研 LLM 网关基础设施:**数据面**(OpenAI 兼容异步流式转发、精确缓存、静态优先级路由 + failover、token 级计量)+ **控制面**(渠道管理、虚拟 key、用量统计 API;React 控制台在 P3)。
 
-完整架构与路线图见 [智能网关-全栈架构.md](智能网关-全栈架构.md)。当前进度:**P1 完成**。
+完整架构与路线图见 [智能网关-全栈架构.md](智能网关-全栈架构.md)。当前进度:P1–P3.5 与 P4 核心完成,Windows 1.0 已完成本地发布验证。
 
-## 当前能力(P1)
+## 当前能力
 
 - **OpenAI 兼容入口** `POST /v1/chat/completions`:非流式 + SSE 流式透传(chunk 到达即转发,不缓冲)
 - **虚拟 key 体系**:每个客户端独立 `sk-gw-*` key(只存哈希),可配月度预算,超预算自动 429
@@ -72,9 +72,9 @@ curl -s "http://localhost:8080/admin/stats/overview?days=7" -H "Authorization: B
 powershell -ExecutionPolicy Bypass -File packaging\build.ps1
 ```
 
-三步产物:控制台前端 → PyInstaller(`dist\LLMGateway\LLMGateway.exe`,免安装直接双击)→ Inno Setup 安装包(`packaging\output\`,机器上装了 Inno Setup 6 才生成)。
+构建产物:`release\Ying-portable.zip`、`release\Ying-Setup-1.0.0.exe` 与 `release\SHA256SUMS.txt`。完整构建需要 Inno Setup 6。
 
-单机版行为:双击启动 → 系统托盘图标(打开控制台/复制 token/数据目录/退出)→ 自动开浏览器进控制台。数据(SQLite/密钥/token/日志)全部在 `%LOCALAPPDATA%\LLMGateway`,卸载不删用户数据,零外部依赖。
+单机版行为:双击启动 → Ying 原生窗口 → 系统托盘图标(打开控制台/复制 token/数据目录/退出)。原生窗口不可用时自动回退系统浏览器。新安装的数据(SQLite/密钥/token/日志)保存在 `%LOCALAPPDATA%\Ying`;旧版 `%LOCALAPPDATA%\LLMGateway` 存在时继续复用,卸载不删用户数据。
 
 ## 部署(Docker Compose,Postgres + Redis)
 
@@ -119,7 +119,7 @@ app/
     cache.py         # 精确匹配缓存(P2 升级 pgvector 语义缓存)
     usage.py         # usage 解析、成本计算、异步计量器
     stats.py         # 控制面统计聚合
-tests/               # 42 个测试:内嵌假上游,全链路不出进程
+tests/               # 128 个测试:内嵌假上游,全链路不出进程
 alembic/             # 数据库迁移
 ```
 
@@ -135,7 +135,7 @@ python -m pytest tests -q
 
 - [x] **P1** 透明代理:兼容入口、渠道注册表、流式透传、计量落库、精确缓存、管理 API
 - [x] **P2** 语义缓存(embedding + 余弦相似度,精确未中才查)、渠道熔断器(滑动窗口错误率 → OPEN → 半开探测 → 恢复,控制台可观测/手动复位)、每 key 滑动窗口限流(Redis 可选,进程内兜底)、Prometheus `/metrics`
-- [ ] **P2.5** Anthropic Messages API 入口(`/v1/messages` + 协议翻译),Claude Code 等客户端配自有 key 走网关
+- [x] **P2.5** Anthropic Messages API 入口(`/v1/messages` + 协议翻译),Claude Code 等客户端配自有 key 走网关
 - [x] **P3** React 控制台(Vite+React+TS+Tailwind+ECharts):额度大盘(总览/每日曲线/按渠道/按模型/预算进度+耗尽预测)、渠道面板(健康灯/启停/优先级/连通测试/熔断状态+复位)、虚拟 key 管理(发放/预算/限流)、实时请求流(WebSocket live-tail)、智能层成绩单(缓存命中/省钱估算/熔断记录);构建产物由 FastAPI 托管于 `/console/`
 - [x] **P3.5** 告警中心(哨兵巡检:预算 80%/100%、渠道熔断、key 异常消耗、错误率突增、日报;去重落库 + 可选 webhook 推送)+ 订阅用量面板(cockpit:只读解析本机 ~/.claude 记录,按 API 牌价折算,不碰厂商接口)
 - [x] **P4(核心)** 难度感知路由:简单请求(短文本/无工具/无代码/少轮次)确定性降级到便宜模型,`X-Gateway-Downgraded` 头 + 计量标记 + 大盘统计;成本按实际路由模型计

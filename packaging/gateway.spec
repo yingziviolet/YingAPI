@@ -1,6 +1,6 @@
 # PyInstaller 规格文件:把网关 + 控制台静态资源打成单目录发行包。
 # 构建:pyinstaller packaging/gateway.spec --noconfirm
-# 产物:dist/LLMGateway/LLMGateway.exe(单目录比单文件启动快得多,安装包场景更合适)
+# 产物:dist/Ying/Ying.exe(单目录比单文件启动快得多,安装包场景更合适)
 import os
 from pathlib import Path
 

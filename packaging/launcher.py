@@ -1,7 +1,7 @@
 """Windows 单机版启动器(PyInstaller 入口)。
 
 行为:
-- 首次运行在 %LOCALAPPDATA%\\LLMGateway 下建数据目录,生成 admin token 与 Fernet 密钥
+- 首次运行在 %LOCALAPPDATA%\\Ying 下建数据目录,生成 admin token 与 Fernet 密钥
 - 起 uvicorn(SQLite,零外部依赖)
 - 用 pywebview 开一个原生应用窗口(Windows 走 WebView2,与 Tauri 同一套渲染),
   有自己的标题栏和图标,没有地址栏/标签页——和普通桌面软件无异
