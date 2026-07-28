@@ -308,6 +308,11 @@ async def setup_quickstart(request: Request, session: AsyncSession = Depends(get
         raise HTTPException(status_code=400, detail="请提供 API key")
 
     preset = detect_provider(api_key)
+    if (preset or {}).get("provider") == "anthropic":
+        raise HTTPException(
+            status_code=400,
+            detail="首次配置仅支持 OpenAI 兼容上游，Anthropic 官方 API key 暂不支持直接接入",
+        )
     base_url = (body.get("base_url") or (preset or {}).get("base_url") or "").strip()
     if not base_url:
         raise HTTPException(
@@ -359,8 +364,7 @@ async def setup_quickstart(request: Request, session: AsyncSession = Depends(get
         enabled=True,
     )
     session.add(channel)
-    await session.commit()
-    await session.refresh(channel)
+    await session.flush()
 
     # 发一把默认虚拟 key(客户端拿它连网关)
     key_name = "default"
@@ -378,6 +382,7 @@ async def setup_quickstart(request: Request, session: AsyncSession = Depends(get
     )
     session.add(vkey)
     await session.commit()
+    await session.refresh(channel)
     await session.refresh(vkey)
 
     balance = None

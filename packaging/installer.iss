@@ -38,7 +38,6 @@ Name: "chinesesimplified"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务:"
-Name: "startupicon"; Description: "开机自动启动网关"; GroupDescription: "附加任务:"; Flags: unchecked
 
 [Files]
 Source: "..\dist\Ying\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -47,10 +46,9 @@ Source: "..\dist\Ying\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{group}\卸载 {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
-Name: "{userstartup}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: startupicon
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Description: "立即启动网关"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExeName}"; Description: "立即启动网关"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallDelete]
 ; 只删程序目录残留;用户数据(%LOCALAPPDATA%\Ying 或兼容的旧目录)保留

@@ -1,4 +1,8 @@
 """开箱引导:一步完成首次配置。"""
+import pytest
+
+import app.api.admin as admin_api
+
 from tests.conftest import ADMIN_HEADERS, create_channel, create_vkey, key_headers
 
 
@@ -66,6 +70,41 @@ async def test_quickstart_needs_base_url_for_unknown_key(client):
     )
     assert resp.status_code == 400
     assert "Base URL" in resp.json()["detail"]
+
+
+async def test_quickstart_rejects_direct_anthropic_key(client, upstream_state):
+    resp = await client.post(
+        "/admin/setup/quickstart",
+        json={"api_key": "sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxx"},
+        headers=ADMIN_HEADERS,
+    )
+    assert resp.status_code == 400
+    assert "OpenAI 兼容" in resp.json()["detail"]
+    assert upstream_state["calls"] == 0
+
+    state = (await client.get("/admin/setup/state", headers=ADMIN_HEADERS)).json()
+    assert state["channels"] == 0 and state["keys"] == 0
+
+
+async def test_quickstart_rolls_back_if_key_creation_fails(client, monkeypatch):
+    def fail_key_creation():
+        raise RuntimeError("key generation failed")
+
+    monkeypatch.setattr(admin_api, "generate_virtual_key", fail_key_creation)
+    with pytest.raises(RuntimeError, match="key generation failed"):
+        await client.post(
+            "/admin/setup/quickstart",
+            json={
+                "api_key": "sk-offline",
+                "base_url": "http://unreachable.invalid/v1",
+                "models": ["m1"],
+                "verify": False,
+            },
+            headers=ADMIN_HEADERS,
+        )
+
+    state = (await client.get("/admin/setup/state", headers=ADMIN_HEADERS)).json()
+    assert state["channels"] == 0 and state["keys"] == 0
 
 
 async def test_quickstart_dedupes_names(client, upstream_state):

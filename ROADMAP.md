@@ -75,7 +75,7 @@ Vite + React + TS + Tailwind v4 + ECharts,构建产物由 FastAPI 托管于 `/co
 - CI:GitHub Actions 跑测试 + 前端构建 + Docker 构建
 
 ### 质量保障
-- **128 个测试**全过(内嵌 ASGI 假上游,全链路不出进程)
+- **130 个测试**全过(内嵌 ASGI 假上游,全链路不出进程)
 - **两轮多智能体对抗性审查**:
   - 第一轮(P1):29 个发现 / 26 确认,全部修复
   - 第二轮(P2/P2.5):26 个发现 / 25 确认,全部修复
@@ -87,7 +87,7 @@ Vite + React + TS + Tailwind v4 + ECharts,构建产物由 FastAPI 托管于 `/co
 ## 三、Windows 1.0 分支与后续
 
 ### 本分支已完成
-- 首次启动引导:粘贴上游 API key → 自动识别渠道 → 创建虚拟 key → 输出客户端配置
+- 首次启动引导:粘贴 OpenAI 兼容上游 API key → 识别渠道 → 创建虚拟 key → 输出客户端配置
 - Ying 品牌、应用图标、浅色/深色首次启动页
 - pywebview 原生窗口、浏览器回退、单实例保护
 - 便携 ZIP、Inno Setup 安装包、SHA-256 校验文件
@@ -249,6 +249,6 @@ packaging/
   gateway.spec         # PyInstaller 配置
   installer.iss        # Inno Setup 安装包
   build.ps1            # 一键构建
-tests/                 # 128 个测试
+tests/                 # 130 个测试
 alembic/versions/      # 迁移 0001-0007
 ```

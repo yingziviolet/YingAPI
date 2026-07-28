@@ -9,8 +9,12 @@ $release = Join-Path $root "release"
 Write-Host "[1/4] Building console..." -ForegroundColor Cyan
 Push-Location (Join-Path $root "console")
 try {
-    if (-not (Test-Path "node_modules")) { npm ci }
+    if (-not (Test-Path "node_modules")) {
+        npm ci
+        if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit code $LASTEXITCODE." }
+    }
     npm run build
+    if ($LASTEXITCODE -ne 0) { throw "Frontend build failed with exit code $LASTEXITCODE." }
 } finally {
     Pop-Location
 }
@@ -19,7 +23,9 @@ Write-Host "[2/4] Building Ying.exe..." -ForegroundColor Cyan
 Push-Location $root
 try {
     python -m pip install --quiet pyinstaller pywebview pystray pillow
+    if ($LASTEXITCODE -ne 0) { throw "Dependency install failed with exit code $LASTEXITCODE." }
     python -m PyInstaller packaging\gateway.spec --noconfirm --distpath dist --workpath build
+    if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE." }
 } finally {
     Pop-Location
 }
@@ -49,13 +55,14 @@ if (-not $iscc) {
 }
 
 & $iscc "/DAppVersion=$Version" (Join-Path $PSScriptRoot "installer.iss")
+if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE." }
 $installer = Join-Path $release "Ying-Setup-$Version.exe"
 Copy-Item (Join-Path $PSScriptRoot "output\Ying-Setup-$Version.exe") $installer -Force
 
 Write-Host "[4/4] Writing checksums..." -ForegroundColor Cyan
 $artifacts = @($installer, $portable)
 $checksums = $artifacts | ForEach-Object {
-    "$(Get-FileHash $_ -Algorithm SHA256 | Select-Object -ExpandProperty Hash)  $(Split-Path $_ -Leaf)"
+    "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant())  $(Split-Path $_ -Leaf)"
 }
 $checksums | Set-Content (Join-Path $release "SHA256SUMS.txt") -Encoding ascii
 Write-Host "Release artifacts are in $release" -ForegroundColor Green

@@ -4,7 +4,7 @@
 
 1. 下载 `Ying-Setup-x.y.z.exe`(安装包)或 `Ying-portable.zip`(免安装)
 2. 双击运行 —— 应用窗口自动打开
-3. 粘贴一个你自己的 API key,点「开始使用」
+3. 粘贴一个 OpenAI 兼容上游的 API key,点「开始使用」
 4. 把界面给出的两行配置复制到你的客户端
 
 就这几步,没有别的。
@@ -23,7 +23,7 @@ export OPENAI_BASE_URL=http://127.0.0.1:8080/v1
 export OPENAI_API_KEY=sk-gw-网关发给你的虚拟key
 ```
 
-**Anthropic 协议客户端**(Claude Code 等,需配自有 API key):
+**Anthropic 协议客户端**(Claude Code 等,使用 Ying 虚拟 key):
 
 ```bash
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8080

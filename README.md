@@ -119,7 +119,7 @@ app/
     cache.py         # 精确匹配缓存(P2 升级 pgvector 语义缓存)
     usage.py         # usage 解析、成本计算、异步计量器
     stats.py         # 控制面统计聚合
-tests/               # 128 个测试:内嵌假上游,全链路不出进程
+tests/               # 130 个测试:内嵌假上游,全链路不出进程
 alembic/             # 数据库迁移
 ```
 

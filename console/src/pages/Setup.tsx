@@ -103,7 +103,7 @@ export default function Setup({ onDone }: { onDone: () => void }) {
         <Logo size={52} />
         <h1 className="mt-4 text-[24px] font-bold tracking-tight text-ink-hi">欢迎使用 Ying</h1>
         <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-mid">
-          填一个你自己的 API key,30 秒完成配置。
+          填一个 OpenAI 兼容上游的 API key,30 秒完成配置。
           <br />
           之后所有 LLM 调用都能走网关:自动缓存省钱、渠道故障自动切换、每一分花费都看得见。
         </p>
@@ -117,7 +117,7 @@ export default function Setup({ onDone }: { onDone: () => void }) {
           </span>
           <Input
             type="password"
-            placeholder="粘贴 API key,自动识别是哪家厂商"
+            placeholder="粘贴 OpenAI 兼容上游的 API key"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             className="w-full"
