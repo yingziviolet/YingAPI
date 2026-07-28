@@ -101,7 +101,7 @@ export default function Setup({ onDone }: { onDone: () => void }) {
     <div className="mx-auto max-w-[620px] py-10">
       <div className="mb-7 flex flex-col items-center text-center">
         <Logo size={52} />
-        <h1 className="mt-4 text-[24px] font-bold tracking-tight text-ink-hi">欢迎使用 LLM 网关</h1>
+        <h1 className="mt-4 text-[24px] font-bold tracking-tight text-ink-hi">欢迎使用 Ying</h1>
         <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-mid">
           填一个你自己的 API key,30 秒完成配置。
           <br />
@@ -182,7 +182,7 @@ export default function Setup({ onDone }: { onDone: () => void }) {
         </div>
 
         <p className="mt-4 border-t border-line-soft pt-4 text-[11.5px] leading-relaxed text-ink-low">
-          key 会用 Fernet 加密存在本机(<code className="rounded bg-surface-sunken px-1">%LOCALAPPDATA%\LLMGateway</code>),
+          key 会用 Fernet 加密存在本机(<code className="rounded bg-surface-sunken px-1">%LOCALAPPDATA%\Ying</code>),
           不上传任何地方。网关只管理你自己合法持有的 key。
         </p>
       </div>
