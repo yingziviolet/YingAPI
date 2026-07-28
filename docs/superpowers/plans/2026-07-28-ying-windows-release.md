@@ -120,18 +120,16 @@ Get-Content -Tail 100 -LiteralPath 'H:\全栈+agent\.tmp\ying-debug-profile\LLMG
 Stop-Process -Id $debugProcess.Id -ErrorAction SilentlyContinue
 ```
 
-Expected: reproduce either a pywebview/CLR traceback or an absent native window. Record the exact evidence in the task log before changing code.
+Observed on 2026-07-28: the existing `Ying.exe` selected WinForms/Chromium and created a visible window in three clean-profile runs taking 4.4–5.1 seconds. The earlier absent-window observation is not reproducible, so do not force a renderer. The confirmed defects are the missing browser fallback after `run_window()` returns `False` and the missing single-instance guard.
 
 - [ ] **Step 2: Write focused failing launcher tests**
 
 Create `tests/test_launcher.py`:
 
 ```python
-import ctypes
 import importlib.util
 import socket
 import sys
-import types
 import uuid
 from pathlib import Path
 
@@ -160,33 +158,6 @@ def test_pick_port_skips_busy_preferred_port():
         busy.bind(("127.0.0.1", 0))
         port = busy.getsockname()[1]
         assert launcher.pick_port(port) != port
-
-
-def test_run_window_forces_edgechromium(monkeypatch):
-    calls = {}
-
-    class Loaded:
-        def __iadd__(self, callback):
-            self.callback = callback
-            return self
-
-    window = types.SimpleNamespace(
-        events=types.SimpleNamespace(loaded=Loaded()),
-        evaluate_js=lambda _code: None,
-        minimize=lambda: None,
-        maximize=lambda: None,
-        restore=lambda: None,
-        destroy=lambda: None,
-    )
-    fake_webview = types.SimpleNamespace(
-        create_window=lambda *_args, **_kwargs: window,
-        start=lambda **kwargs: calls.update(kwargs),
-    )
-    monkeypatch.setitem(sys.modules, "webview", fake_webview)
-    monkeypatch.delenv("GW_WEBVIEW_DEBUG", raising=False)
-
-    assert launcher.run_window({"url": "http://127.0.0.1:8080/console/", "token": "test"})
-    assert calls == {"gui": "edgechromium", "debug": False}
 
 
 def test_window_failure_opens_browser_before_tray(monkeypatch):
@@ -229,7 +200,7 @@ Run:
 python -m pytest tests/test_launcher.py -q --basetemp 'H:\全栈+agent\.tmp\pytest-launcher-red' -p no:cacheprovider
 ```
 
-Expected: `test_run_window_forces_edgechromium`, `test_window_failure_opens_browser_before_tray`, and `test_single_instance_mutex` fail because the launcher does not yet expose the required behavior.
+Expected: `test_window_failure_opens_browser_before_tray` and `test_single_instance_mutex` fail because the launcher does not yet expose the required behavior. The existing data-directory and port tests pass.
 
 - [ ] **Step 4: Add the minimal launcher lifecycle code**
 
@@ -304,15 +275,6 @@ Change the tray tooltip to:
         f"Ying · LLM 网关 (127.0.0.1:{config['port']})",
 ```
 
-Change the final pywebview call in `run_window()` to:
-
-```python
-        webview.start(
-            gui="edgechromium",
-            debug=os.environ.get("GW_WEBVIEW_DEBUG") == "1",
-        )
-```
-
 Move the UI selection into a testable function:
 
 ```python
@@ -360,7 +322,7 @@ python -m pytest tests/test_launcher.py -q --basetemp 'H:\全栈+agent\.tmp\pyte
 python -m pytest tests -q --basetemp 'H:\全栈+agent\.tmp\pytest-all-after-launcher' -p no:cacheprovider
 ```
 
-Expected: 5 launcher tests pass on Windows and the complete suite reports 129 passed.
+Expected: 4 launcher tests pass on Windows and the complete suite reports 128 passed.
 
 - [ ] **Step 6: Commit the launcher fix**
 
@@ -772,7 +734,7 @@ git diff --check
 
 Run the npm commands from `H:\全栈+agent\console`.
 
-Expected: 129 Python tests pass, lint and production build exit 0, and Git reports no whitespace errors.
+Expected: 128 Python tests pass, lint and production build exit 0, and Git reports no whitespace errors.
 
 - [ ] **Step 4: Review the final source diff and tracked-file list**
 
